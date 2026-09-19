@@ -22,13 +22,13 @@ function useClock() {
   return t;
 }
 
-export default function Header() {
+export default function Header({ onHelp }) {
   const { layers, aoi, toast, drawer, setDrawer, sceneGeo } = useApp();
   const clock = useClock();
 
   const georef = isGeoreferenced(sceneGeo);
   const place = useMemo(
-    () => (georef ? placeSummary(aoiCentroid(aoi).lat, aoiCentroid(aoi).lon) : null),
+    () => (georef ? placeSummary(aoiCentroid(aoi, sceneGeo).lat, aoiCentroid(aoi, sceneGeo).lon) : null),
     [georef, aoi]
   );
 
@@ -46,6 +46,8 @@ export default function Header() {
         className={`icon-btn shrink-0 lg:hidden ${drawer === 'imagery' ? 'icon-btn-on' : ''}`}
         title="imagery panel"
         aria-label="imagery panel"
+        aria-expanded={drawer === 'imagery'}
+        aria-controls="imagery-panel"
         onClick={() => setDrawer(drawer === 'imagery' ? null : 'imagery')}
       >
         <Icon name="layers" size={16} />
@@ -71,7 +73,7 @@ export default function Header() {
         {georef ? (
           <span
             className="flex min-w-0 items-center gap-1.5"
-            title={`AOI centroid ${fmtLat(aoiCentroid(aoi).lat)} ${fmtLon(aoiCentroid(aoi).lon)} · scene footprint declared in ${sceneGeo.crs} (exact) · place name from embedded gazetteer (~1 km)`}
+            title={`AOI centroid ${fmtLat(aoiCentroid(aoi, sceneGeo).lat)} ${fmtLon(aoiCentroid(aoi, sceneGeo).lon)} · scene footprint declared in ${sceneGeo.crs} (exact) · place name from embedded gazetteer (~1 km)`}
           >
             <span className="truncate text-[12.5px] font-medium text-t1">{place.name}</span>
             <span className="hidden shrink-0 text-[11px] text-t3 lg:inline">{place.distance}</span>
@@ -105,10 +107,19 @@ export default function Header() {
         </div>
 
         <button
+          onClick={() => onHelp?.()}
+          className="icon-btn shrink-0"
+          title="console guide · keyboard map and data provenance (?)"
+          aria-label="open the console guide"
+        >
+          <Icon name="info" size={15} />
+        </button>
+
+        <button
           onClick={exportLayers}
           title={georef ? 'download map layer · GeoJSON' : 'download map layer · withheld, no georeference'}
           aria-label="download map layer as GeoJSON"
-          className="flex items-center gap-1.5 text-[11.5px] text-accent transition-opacity hover:opacity-80"
+          className="no-print flex items-center gap-1.5 text-[11.5px] text-accent transition-opacity hover:opacity-80"
         >
           <Icon name="download" size={14} />
           <span className="hidden sm:inline">Download map layer</span>
@@ -118,6 +129,8 @@ export default function Header() {
           className={`icon-btn shrink-0 lg:hidden ${drawer === 'query' ? 'icon-btn-on' : ''}`}
           title="query panel"
           aria-label="query panel"
+          aria-expanded={drawer === 'query'}
+          aria-controls="query-panel"
           onClick={() => setDrawer(drawer === 'query' ? null : 'query')}
         >
           <Icon name="comment" size={16} />

@@ -3,13 +3,22 @@ import { Icon } from './Icons.jsx';
 import { Ring, DbScale } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { ABSTAIN_GATE } from '../lib/model.js';
-import { aoiCentroid, fmtLat, fmtLon, isGeoreferenced } from '../lib/geo.js';
+import {
+  aoiAreaKm2,
+  aoiCentroid,
+  fmtLat,
+  fmtLon,
+  isGeoreferenced,
+  utmBlock
+} from '../lib/geo.js';
 import { exportAnswerGeoJSON, exportAnswerJSON, exportAnswerMarkdown } from '../lib/export.js';
+import { useEscape } from '../lib/hooks.js';
 
-function ExportMenu({ payload, centroid, georef }) {
+function ExportMenu({ payload, centroid, georef, aoiPoints }) {
   const { toast, sceneGeo } = useApp();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
+  const triggerRef = useRef(null);
 
   // a menu that only closes when you pick an item feels broken
   useEffect(() => {
@@ -17,29 +26,30 @@ function ExportMenu({ payload, centroid, georef }) {
     const onDown = (e) => {
       if (!wrapRef.current?.contains(e.target)) setOpen(false);
     };
-    const onKey = (e) => e.key === 'Escape' && setOpen(false);
     window.addEventListener('pointerdown', onDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('pointerdown', onDown);
-      window.removeEventListener('keydown', onKey);
-    };
+    return () => window.removeEventListener('pointerdown', onDown);
   }, [open]);
+  useEscape(() => {
+    setOpen(false);
+    triggerRef.current?.focus({ preventScroll: true });
+  }, open);
+
   const item =
     'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
   const fire = (fn, msg) => () => {
-    fn(payload, sceneGeo);
+    fn(payload, sceneGeo, centroid, aoiPoints);
     toast(msg);
     setOpen(false);
   };
   const fireGeoJSON = () => {
-    const written = exportAnswerGeoJSON(payload, sceneGeo, centroid);
+    const written = exportAnswerGeoJSON(payload, sceneGeo, centroid, aoiPoints);
     toast(written ? 'result exported · GeoJSON footprint' : 'withheld — the scene is not georeferenced');
     setOpen(false);
   };
   return (
-    <div ref={wrapRef} className="relative mb-2 flex justify-end">
+    <div ref={wrapRef} className="no-print relative mb-2 flex justify-end">
       <button
+        ref={triggerRef}
         className={`chip ${open ? '!border-accent/50 !text-t1' : ''}`}
         aria-expanded={open}
         aria-haspopup="menu"
@@ -50,7 +60,7 @@ function ExportMenu({ payload, centroid, georef }) {
         <Icon name="chevron" size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
       </button>
       {open && (
-        <div className="recess absolute right-0 top-7 z-20 w-56 px-1.5 py-1.5" role="menu">
+        <div className="recess absolute right-0 top-7 z-20 w-56 px-1.5 py-1.5" role="menu" aria-label="export the result">
           <button className={item} role="menuitem" onClick={fire(exportAnswerJSON, 'result exported · JSON evidence bundle')}>
             <span className="data-mono w-12 text-t3">.json</span>
             evidence bundle · full payload
@@ -181,6 +191,9 @@ function PhysicsCallout({ pc }) {
         <p className="mt-2.5 border-t border-warn/15 pt-2 text-[11.5px] leading-[17px] text-t2">
           {pc.verdict}
         </p>
+        <p className="mt-1.5 text-[10px] leading-4 text-t3" title="provenance">
+          readings: analysis-service fixture · scale and marker positions derived
+        </p>
       </div>
     </div>
   );
@@ -235,11 +248,13 @@ function Trace({ steps }) {
   );
 }
 
-function GeodeticRow({ payload, centroid, georef }) {
+// The geodetic row keeps the two kinds of number visibly apart: the centroid
+// and the AOI area are derived from what the user drew, the hectare figure is
+// the answer fixture, and the UTM block is projected from the centroid.
+function GeodeticRow({ payload, centroid, georef, aoiPoints }) {
   const { toast, sceneGeo } = useApp();
   const geo = payload.geodetic;
 
-  // No georeference on the scene means no honest coordinates to show.
   if (!georef) {
     return (
       <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2">
@@ -250,31 +265,51 @@ function GeodeticRow({ payload, centroid, georef }) {
     );
   }
 
+  const utm = utmBlock(centroid.lat, centroid.lon);
+  const derivedArea = aoiPoints?.length > 2 ? aoiAreaKm2(aoiPoints, sceneGeo) : null;
+
   const exportGeo = () => {
-    const written = exportAnswerGeoJSON(payload, sceneGeo, centroid);
+    const written = exportAnswerGeoJSON(payload, sceneGeo, centroid, aoiPoints);
     toast(written ? 'GeoJSON written · footprint centred on the drawn AOI' : 'withheld — scene is not georeferenced');
   };
 
   return (
-    <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-edge bg-recess px-3 py-2">
-      <Icon name="crosshair" size={12} className="shrink-0 text-t3" />
-      <span
-        className="data-mono whitespace-nowrap text-t2"
-        title="centroid of the AOI you drew — recomputed whenever the AOI moves"
-      >
-        {fmtLat(centroid.lat)} {fmtLon(centroid.lon)}
-      </span>
-      <span className="data-mono whitespace-nowrap text-t3" title="area from the analysis-service answer fixture">
-        {geo.area_ha.toFixed(1)} ha
-      </span>
-      <span className="text-[9.5px] uppercase tracking-wider text-t3">AOI centroid</span>
-      <button
-        onClick={exportGeo}
-        className="ml-auto flex items-center gap-1 whitespace-nowrap rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10.5px] font-semibold text-accent transition-colors hover:bg-accent/20"
-      >
-        <Icon name="download" size={11} />
-        Download GeoJSON
-      </button>
+    <div className="mt-2.5 rounded-md border border-edge bg-recess px-3 py-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <Icon name="crosshair" size={12} className="shrink-0 text-t3" />
+        <span
+          className="data-mono whitespace-nowrap text-t2"
+          title="centroid of the AOI you drew — recomputed whenever the AOI moves"
+        >
+          {fmtLat(centroid.lat)} {fmtLon(centroid.lon)}
+        </span>
+        <span className="text-[9.5px] uppercase tracking-wider text-t3">AOI centroid</span>
+        <button
+          onClick={exportGeo}
+          className="no-print ml-auto flex items-center gap-1 whitespace-nowrap rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10.5px] font-semibold text-accent transition-colors hover:bg-accent/20"
+        >
+          <Icon name="download" size={11} />
+          Download GeoJSON
+        </button>
+      </div>
+      <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 border-t border-edge pt-2 sm:grid-cols-3">
+        <div title="derived from the ring you drew, WGS84">
+          <dt className="text-[9px] uppercase tracking-wider text-t3">AOI area · derived</dt>
+          <dd className="data-mono text-[11px] text-t1">
+            {derivedArea != null ? `${derivedArea.toFixed(1)} km²` : '—'}
+          </dd>
+        </div>
+        <div title="the analysis service's figure, labelled as a fixture">
+          <dt className="text-[9px] uppercase tracking-wider text-t3">footprint · fixture</dt>
+          <dd className="data-mono text-[11px] text-t1">{geo.area_ha.toFixed(1)} ha</dd>
+        </div>
+        <div title="Snyder forward transverse Mercator, checked against PROJ">
+          <dt className="text-[9px] uppercase tracking-wider text-t3">UTM {utm.zone}</dt>
+          <dd className="data-mono text-[11px] text-t1">
+            {utm.easting_m.toFixed(0)} E · {utm.northing_m.toFixed(0)} N
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -285,12 +320,28 @@ export default function Answer({ q, onFollowup }) {
 
   const p = q.payload;
   const georef = isGeoreferenced(sceneGeo);
-  const centroid = aoiCentroid(aoi);
+  const centroid = aoiCentroid(aoi, sceneGeo);
+
+  const copyAnswer = async () => {
+    const parts = [
+      `Q · ${p.question}`,
+      p.confidence.abstained
+        ? `DECLINED TO ANSWER — consistency ${p.confidence.consistency_score.toFixed(2)} (gate < ${ABSTAIN_GATE})`
+        : p.answer_text,
+      `consistency ${p.confidence.consistency_score.toFixed(2)} — ${p.confidence.reason}`
+    ];
+    try {
+      await navigator.clipboard.writeText(parts.join('\n'));
+      toast('answer copied to clipboard');
+    } catch {
+      toast('clipboard unavailable in this browser');
+    }
+  };
 
   const runFollowup = (f) => {
     const item = typeof f === 'string' ? { label: f, action: 'query' } : f;
     if (item.action === 'export') {
-      const written = exportAnswerGeoJSON(p, sceneGeo, centroid);
+      const written = exportAnswerGeoJSON(p, sceneGeo, centroid, aoi);
       toast(written ? 'footprint exported · GeoJSON' : 'withheld — the scene is not georeferenced');
       return;
     }
@@ -298,8 +349,8 @@ export default function Answer({ q, onFollowup }) {
   };
 
   return (
-    <div className="answer-in">
-      <ExportMenu payload={p} centroid={centroid} georef={georef} />
+    <article className="answer-in" aria-label={`answer to: ${p.question}`}>
+      <ExportMenu payload={p} centroid={centroid} georef={georef} aoiPoints={aoi} />
       {!p.confidence.abstained && (
         <p className="text-[12.5px] leading-[19px] text-t1">{p.answer_text}</p>
       )}
@@ -311,27 +362,29 @@ export default function Answer({ q, onFollowup }) {
       <ConfidenceRow conf={p.confidence} />
       <PhysicsCallout pc={p.physics_check} />
       <Trace steps={p.trace} />
-      <GeodeticRow payload={p} centroid={centroid} georef={georef} />
-      {p.followups && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {p.followups.map((f) => {
-            const item = typeof f === 'string' ? { label: f, action: 'query' } : f;
-            const exportBlocked = item.action === 'export' && !georef;
-            return (
-              <button
-                key={item.label}
-                onClick={() => runFollowup(item)}
-                disabled={exportBlocked}
-                title={exportBlocked ? 'withheld — scene is not georeferenced' : item.label}
-                className={`chip ${exportBlocked ? 'cursor-not-allowed opacity-40' : ''}`}
-              >
-                <span className="text-accent">{item.action === 'export' ? '⤓' : '↳'}</span>
-                {item.label}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
+      <GeodeticRow payload={p} centroid={centroid} georef={georef} aoiPoints={aoi} />
+      <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+        <button className="chip no-print" onClick={copyAnswer} title="copy the answer as text">
+          <Icon name="copy" size={11} />
+          Copy answer
+        </button>
+        {p.followups?.map((f) => {
+          const item = typeof f === 'string' ? { label: f, action: 'query' } : f;
+          const exportBlocked = item.action === 'export' && !georef;
+          return (
+            <button
+              key={item.label}
+              onClick={() => runFollowup(item)}
+              disabled={exportBlocked}
+              title={exportBlocked ? 'withheld — scene is not georeferenced' : item.label}
+              className={`chip ${exportBlocked ? 'cursor-not-allowed opacity-40' : ''}`}
+            >
+              <span className="text-accent">{item.action === 'export' ? '⤓' : '↳'}</span>
+              {item.label}
+            </button>
+          );
+        })}
+      </div>
+    </article>
   );
 }

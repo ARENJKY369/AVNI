@@ -24,8 +24,15 @@ import {
 // extent (u to the right, v downward), so a mask at u=0.3 sits on the same
 // ground as a lat/lon computed from u=0.3.
 
-const KM_PER_DEG_LAT = 110.63; // meridional degree at ~13° N
-const kmPerDegLon = (lat) => 111.32 * Math.cos((lat * Math.PI) / 180);
+import {
+  geodesicDistanceMetres,
+  geodesicInverse,
+  metresPerDegreeLat,
+  metresPerDegreeLon,
+  ringAreaHa,
+  ringAreaKm2,
+  utmForward
+} from './geodesy.js';
 
 export const SCENE_RASTER = { width: 1376, height: 768 };
 export const SCENE_ASPECT = SCENE_RASTER.width / SCENE_RASTER.height;
@@ -35,8 +42,12 @@ const SCENE_WIDTH_KM = 22.0305;
 
 export const SCENE_GSD_M = (SCENE_WIDTH_KM * 1000) / SCENE_RASTER.width; // 16.01 m/px
 
-const latSpan = ((SCENE_GSD_M * SCENE_RASTER.height) / 1000) / KM_PER_DEG_LAT;
-const lonSpan = SCENE_WIDTH_KM / kmPerDegLon(SCENE_CENTRE.lat);
+// The spans come from the WGS84 radii of curvature at the scene centre
+// (metres per degree of latitude / longitude), not from a round constant.
+const metresLat = metresPerDegreeLat(SCENE_CENTRE.lat);
+const metresLon = metresPerDegreeLon(SCENE_CENTRE.lat);
+const latSpan = (SCENE_GSD_M * SCENE_RASTER.height) / metresLat;
+const lonSpan = (SCENE_WIDTH_KM * 1000) / metresLon;
 
 export const SCENE_EXTENT = {
   minLat: SCENE_CENTRE.lat - latSpan / 2,
@@ -49,8 +60,8 @@ export const SCENE_EXTENT = {
 export function extentKm(extent = SCENE_EXTENT) {
   const midLat = (extent.minLat + extent.maxLat) / 2;
   return {
-    widthKm: (extent.maxLon - extent.minLon) * kmPerDegLon(midLat),
-    heightKm: (extent.maxLat - extent.minLat) * KM_PER_DEG_LAT
+    widthKm: ((extent.maxLon - extent.minLon) * metresPerDegreeLon(midLat)) / 1000,
+    heightKm: ((extent.maxLat - extent.minLat) * metresPerDegreeLat(midLat)) / 1000
   };
 }
 
@@ -126,33 +137,27 @@ export const GAZETTEER = [
   { name: 'Hosur', region: 'Tamil Nadu', lat: 12.7409, lon: 77.8253 }
 ];
 
-const EARTH_KM = 6371.0088;
-const toRad = (d) => (d * Math.PI) / 180;
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-export function haversineKm(lat1, lon1, lat2, lon2) {
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * EARTH_KM * Math.asin(Math.sqrt(a));
+/**
+ * Ground distance in kilometres, on the WGS84 ellipsoid (Vincenty). The name
+ * says geodesic because that is what it is — an earlier build used a spherical
+ * haversine with a mean radius, which is ~0.3 % off at this latitude.
+ */
+export function distanceKm(lat1, lon1, lat2, lon2) {
+  return geodesicDistanceMetres(lat1, lon1, lat2, lon2) / 1000;
 }
 
-// direction from (lat1,lon1) toward (lat2,lon2)
+/** Compass label for the geodesic azimuth from (lat1,lon1) toward (lat2,lon2). */
 export function bearingLabel(lat1, lon1, lat2, lon2) {
-  const y = Math.sin(toRad(lon2 - lon1)) * Math.cos(toRad(lat2));
-  const x =
-    Math.cos(toRad(lat1)) * Math.sin(toRad(lat2)) -
-    Math.sin(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.cos(toRad(lon2 - lon1));
-  const deg = ((Math.atan2(y, x) * 180) / Math.PI + 360) % 360;
-  return COMPASS[Math.round(deg / 45) % 8];
+  const { initialBearingDeg } = geodesicInverse(lat1, lon1, lat2, lon2);
+  return COMPASS[Math.round(initialBearingDeg / 45) % 8];
 }
 
 export function nearestPlace(lat, lon) {
   let best = null;
   for (const p of GAZETTEER) {
-    const km = haversineKm(lat, lon, p.lat, p.lon);
+    const km = distanceKm(lat, lon, p.lat, p.lon);
     if (!best || km < best.km) best = { ...p, km };
   }
   return {
@@ -173,11 +178,46 @@ export function placeSummary(lat, lon) {
   return { ...p, short: d === 'at' ? p.name : `${p.name} ${d}`, distance: d };
 }
 
-export function aoiCentroid(aoiPoints) {
+export function aoiCentroid(aoiPoints, geo = null) {
   const n = aoiPoints.length;
   const u = aoiPoints.reduce((s, p) => s + p.u, 0) / n;
   const v = aoiPoints.reduce((s, p) => s + p.v, 0) / n;
-  return toGeo(u, v);
+  return toGeo(u, v, geo);
+}
+
+/** The drawn AOI as a lat/lon ring — the same vertices the viewer renders. */
+export function aoiRing(aoiPoints = [], geo = null) {
+  return aoiPoints.map((p) => toGeo(p.u, p.v, geo));
+}
+
+/**
+ * Area of the drawn AOI, computed from the ring itself (WGS84 radii of
+ * curvature at its centroid, shoelace on the local tangent plane). This is a
+ * derived number: move the AOI and it changes. The answer card's area is the
+ * analysis service's figure and is labelled as such.
+ */
+export function aoiAreaKm2(aoiPoints = [], geo = null) {
+  return ringAreaKm2(aoiRing(aoiPoints, geo));
+}
+
+export function aoiAreaHa(aoiPoints = [], geo = null) {
+  return ringAreaHa(aoiRing(aoiPoints, geo));
+}
+
+/** UTM zone label for a point, e.g. "43N". */
+export function utmZoneLabel(lat, lon) {
+  return utmForward(lat, lon).label;
+}
+
+/** UTM block for a point — the projection an Indian EO pipeline reports in. */
+export function utmBlock(lat, lon) {
+  const utm = utmForward(lat, lon);
+  return {
+    zone: utm.label,
+    easting_m: utm.easting,
+    northing_m: utm.northing,
+    note: 'WGS84 / UTM, computed from the footprint centre'
+  };
 }
 
 // The bundled scene carries a declared footprint; an arbitrary upload does
@@ -210,11 +250,19 @@ export function withheldGeodetic(geo) {
   };
 }
 
+/**
+ * The footprint every u,v is resolved against. A registered upload brings its
+ * own extent (read from GeoTIFF tags or the SAFE metadata); scenes with no
+ * georeference never reach here because the geodesy features switch off.
+ */
+export const extentOf = (geo) => geo?.extent || SCENE_EXTENT;
+
 // u,v are 0..1 fractions across the displayed scene (v from the top,
-// image-space) -> geographic coordinates.
-export function toGeo(u, v) {
-  const lat = SCENE_EXTENT.maxLat - v * (SCENE_EXTENT.maxLat - SCENE_EXTENT.minLat);
-  const lon = SCENE_EXTENT.minLon + u * (SCENE_EXTENT.maxLon - SCENE_EXTENT.minLon);
+// image-space) -> geographic coordinates, on the *registered* footprint.
+export function toGeo(u, v, geo = null) {
+  const ext = extentOf(geo);
+  const lat = ext.maxLat - v * (ext.maxLat - ext.minLat);
+  const lon = ext.minLon + u * (ext.maxLon - ext.minLon);
   return { lat, lon };
 }
 
@@ -275,13 +323,10 @@ const polyStringToPoints = (s) =>
 // GeoJSON export
 // ------------------------------------------------------------------ */
 
-const M_PER_DEG_LAT = 110630;
-const M_PER_DEG_LON = (lat) => 111320 * Math.cos((lat * Math.PI) / 180);
-
 export function boxAround(lat, lon, areaHa) {
   const side = Math.sqrt(Math.max(0, areaHa) * 10000); // metres
-  const dLat = side / 2 / M_PER_DEG_LAT;
-  const dLon = side / 2 / M_PER_DEG_LON(lat);
+  const dLat = side / 2 / metresPerDegreeLat(lat);
+  const dLon = side / 2 / metresPerDegreeLon(lat);
   return [
     [lon - dLon, lat - dLat],
     [lon + dLon, lat - dLat],
@@ -292,6 +337,32 @@ export function boxAround(lat, lon, areaHa) {
 }
 
 const CRS_BLOCK = { type: 'name', properties: { name: 'urn:ogc:def:crs:OGC:1.3:CRS84' } };
+
+/**
+ * Provenance of every number this console shows. It travels with the exports
+ * so a reader never has to guess which figures are measured and which are the
+ * mock analysis service's fixtures.
+ */
+export const PROVENANCE = Object.freeze({
+  derived: {
+    extent: 'declared scene footprint (raster aspect x 22.0305 km ground width)',
+    ground_sample_distance: 'extent / raster pixels, WGS84 metres per degree',
+    scale_bar: 'extent / sheet width / zoom — the drawn length and the label are one measurement',
+    cursor_position: 'pointer -> uv -> WGS84 lat/lon through the footprint',
+    aoi_centroid: 'mean of the drawn AOI vertices',
+    aoi_area: 'WGS84 radii of curvature at the ring centroid, shoelace on the tangent plane',
+    utm: 'Snyder forward transverse Mercator (EPSG:32643), checked against PROJ',
+    place_name: `nearest embedded gazetteer entry (~${GAZETTEER_ACCURACY_KM} km accuracy class)`,
+    layer_geometry: 'the overlay paths as drawn in image space, mapped through the footprint'
+  },
+  fixture: {
+    answer_text: 'AVNI-VL 0.9 answer bank (mock analysis service)',
+    consistency: 'answer bank score; the gate verdict is derived from it',
+    physics_check: 'answer bank NDWI / sigma0 readings',
+    area_ha: 'answer bank area, centred on the derived AOI centroid',
+    acquisition_dates: 'scene metadata fixture'
+  }
+});
 
 const refusal = (geo) => ({
   type: 'FeatureCollection',
@@ -310,7 +381,7 @@ export function georefBlock(geo) {
 
 // The answer footprint: the CENTROID comes from the AOI the user drew, the
 // area from the analysis fixture. Nothing here is a hardcoded coordinate.
-export function buildAnswerGeoJSON(answer, centroid, geo = SCENE_GEO) {
+export function buildAnswerGeoJSON(answer, centroid, geo = SCENE_GEO, aoiPoints = []) {
   if (!isGeoreferenced(geo) || !centroid) return refusal(geo);
   const { lat, lon } = centroid;
   const areaHa = answer.geodetic?.area_ha ?? 0;
@@ -319,6 +390,8 @@ export function buildAnswerGeoJSON(answer, centroid, geo = SCENE_GEO) {
     name: 'avni_answer',
     crs: CRS_BLOCK,
     georeference: georefBlock(geo),
+    utm: utmBlock(lat, lon),
+    provenance: PROVENANCE,
     features: [
       {
         type: 'Feature',
@@ -340,6 +413,8 @@ export function buildAnswerGeoJSON(answer, centroid, geo = SCENE_GEO) {
           kind: 'answer_footprint',
           area_ha: areaHa,
           area_source: 'analysis-service area fixture, centred on the drawn AOI',
+          aoi_area_km2: aoiPoints.length > 2 ? Number(aoiAreaKm2(aoiPoints).toFixed(4)) : null,
+          aoi_area_source: 'derived from the drawn AOI ring',
           method: 'AVNI water mask ∩ AOI'
         },
         geometry: { type: 'Polygon', coordinates: [boxAround(lat, lon, areaHa)] }
@@ -419,7 +494,12 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
         region: place.region,
         place_offset: place.distance,
         place_source: `embedded gazetteer (~${GAZETTEER_ACCURACY_KM} km)`,
-        centroid: [Number(c.lon.toFixed(6)), Number(c.lat.toFixed(6))]
+        centroid: [Number(c.lon.toFixed(6)), Number(c.lat.toFixed(6))],
+        area_km2: Number(aoiAreaKm2(aoiPoints).toFixed(4)),
+        area_source: 'derived from the drawn AOI ring',
+        utm_zone: utmZoneLabel(c.lat, c.lon),
+        utm_easting_m: utmBlock(c.lat, c.lon).easting_m,
+        utm_northing_m: utmBlock(c.lat, c.lon).northing_m
       },
       geometry: {
         type: 'Polygon',

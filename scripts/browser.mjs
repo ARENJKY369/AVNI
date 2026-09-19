@@ -25,6 +25,22 @@ const LIBS = [
   ['al2', 'glibc 2.26+ (Amazon Linux 2, Ubuntu 20.04)']
 ];
 
+// @sparticuz/chromium v153 stopped exporting ./package.json, so resolve the
+// entry point and walk up to the package root instead.
+function chromiumPackageDir() {
+  try {
+    return path.dirname(require.resolve('@sparticuz/chromium/package.json'));
+  } catch {
+    let dir = path.dirname(require.resolve('@sparticuz/chromium'));
+    while (!existsSync(path.join(dir, 'package.json'))) {
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return dir;
+  }
+}
+
 function unpackSharedLibs() {
   if (process.platform !== 'linux') return;
   const root = path.join(tmpdir(), 'avni-chromium-libs');
@@ -33,11 +49,7 @@ function unpackSharedLibs() {
     const dir = path.join(root, name);
     const lib = path.join(dir, 'lib', 'libnss3.so');
     if (!existsSync(lib)) {
-      const archive = path.join(
-        path.dirname(require.resolve('@sparticuz/chromium/package.json')),
-        'bin',
-        `${name}.tar.br`
-      );
+      const archive = path.join(chromiumPackageDir(), 'bin', `${name}.tar.br`);
       if (!existsSync(archive)) continue;
       try {
         mkdirSync(dir, { recursive: true });

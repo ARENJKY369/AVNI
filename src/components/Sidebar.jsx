@@ -1,9 +1,20 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { Dot } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { SCENES } from '../data/mock.js';
-import { fmtLat, fmtLon, gsdLabel, isGeoreferenced } from '../lib/geo.js';
+import { useFocusTrap, useMedia } from '../lib/hooks.js';
+import {
+  aoiAreaKm2,
+  aoiCentroid,
+  fmtLat,
+  fmtLon,
+  gsdLabel,
+  isGeoreferenced,
+  utmBlock
+} from '../lib/geo.js';
+import { ACCEPT_ATTR, SUPPORT_MATRIX, UNSUPPORTED_NOTE } from '../lib/scene-format.js';
+import { stopNote } from '../lib/segment.js';
 
 function Section({ label, right, children, className = '' }) {
   return (
@@ -18,12 +29,19 @@ function Section({ label, right, children, className = '' }) {
 }
 
 function Dropzone() {
-  const { uploadHover, setUploadHover, registerUpload } = useApp();
+  const { uploadHover, setUploadHover, registerUpload, registerSafeFolder, registerUrl, sceneBusy, opticalFile } =
+    useApp();
   const inputRef = useRef(null);
+  const folderRef = useRef(null);
+  const [showUrl, setShowUrl] = useState(false);
+  const [url, setUrl] = useState('');
 
   const onFiles = (files) => {
-    const f = files && files[0];
-    if (f) registerUpload(f);
+    if (!files || !files.length) return;
+    // a folder drop arrives as many files with webkitRelativePath set
+    const isFolder = Array.from(files).some((f) => f.webkitRelativePath) || files.length > 1;
+    if (isFolder) registerSafeFolder(files);
+    else registerUpload(files[0]);
   };
 
   return (
@@ -38,30 +56,107 @@ function Dropzone() {
         setUploadHover(false);
         onFiles(e.dataTransfer.files);
       }}
-      className={`recess flex cursor-pointer flex-col items-center gap-1.5 border-dashed px-4 py-5 text-center transition-colors ${
+      className={`recess flex flex-col gap-2 border-dashed px-4 py-4 transition-colors ${
         uploadHover ? '!border-accent/60 bg-accent/5' : ''
       }`}
-      onClick={() => inputRef.current?.click()}
     >
-      <input
-        ref={inputRef}
-        type="file"
-        className="hidden"
-        aria-label="register a scene file"
-        accept="image/*,.tif,.tiff,.jp2,.safe"
-        onChange={(e) => onFiles(e.target.files)}
-      />
-      <span className="text-accent">
-        <Icon name="file" size={20} sw={1.4} />
-      </span>
-      <span className="text-[12.5px] font-semibold text-t1">
-        {uploadHover ? 'release to register scene' : 'Drop optical or SAR scene'}
-      </span>
-      <span className="text-[10.5px] text-t3">Sentinel-2 L2A / Sentinel-1 GRD</span>
-      <span className="mt-1 flex items-center gap-1 text-[11px] font-medium text-accent">
-        <Icon name="upload" size={12} />
-        Browse files
-      </span>
+      <div className="flex cursor-pointer flex-col items-center gap-1.5 text-center" onClick={() => inputRef.current?.click()}>
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          aria-label="register a scene file"
+          accept={ACCEPT_ATTR}
+          onChange={(e) => onFiles(e.target.files)}
+        />
+        <input
+          ref={folderRef}
+          type="file"
+          className="hidden"
+          multiple
+          // @ts-ignore — webkitdirectory is the only way to hand the browser a folder
+          webkitdirectory=""
+          directory=""
+          aria-label="register a Sentinel SAFE folder"
+          onChange={(e) => onFiles(e.target.files)}
+        />
+        <span className="text-accent">
+          <Icon name="file" size={20} sw={1.4} />
+        </span>
+        <span className="text-[12.5px] font-semibold text-t1">
+          {uploadHover ? 'release to register scene' : 'Drop imagery — file, folder or ZIP'}
+        </span>
+        <span className="text-[10px] leading-4 text-t3">
+          GeoTIFF · COG · JPEG2000 · Sentinel SAFE (folder or .zip)
+          <br />
+          PNG/JPEG accepted as a fallback — no CRS, geodesy off
+        </span>
+        <span className="mt-1 flex items-center gap-1 text-[11px] font-medium text-accent">
+          <Icon name="upload" size={12} />
+          Browse files
+        </span>
+      </div>
+
+      <div className="flex items-center justify-between gap-2 border-t hair pt-2">
+        <button
+          className="text-[10.5px] font-medium text-t2 transition-colors hover:text-t1"
+          onClick={() => folderRef.current?.click()}
+        >
+          open a .SAFE folder
+        </button>
+        <button
+          className="text-[10.5px] font-medium text-t2 transition-colors hover:text-t1"
+          aria-expanded={showUrl}
+          onClick={() => setShowUrl((v) => !v)}
+        >
+          load from URL
+        </button>
+      </div>
+
+      {showUrl && (
+        <form
+          className="flex gap-1.5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            registerUrl(url);
+            setUrl('');
+          }}
+        >
+          <input
+            className="input h-7 flex-1 text-[11px]"
+            placeholder="https://…/tile.tif (COG reads ranges)"
+            aria-label="scene URL"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <button type="submit" className="icon-btn !h-7 !w-7">
+            <Icon name="send" size={12} />
+          </button>
+        </form>
+      )}
+
+      {sceneBusy && (
+        <span className="flex items-center gap-1.5 text-[10.5px] text-accent" role="status">
+          <span className="spin-slow inline-flex">
+            <Icon name="refresh" size={11} />
+          </span>
+          {sceneBusy.stage}
+          {sceneBusy.name ? ` · ${String(sceneBusy.name).split('/').pop().slice(0, 32)}` : ''}
+        </span>
+      )}
+
+      <details className="text-[10px] text-t3">
+        <summary className="cursor-pointer">what AVNI reads</summary>
+        <ul className="mt-1.5 space-y-1">
+          {SUPPORT_MATRIX.map((row) => (
+            <li key={row.id} className="flex justify-between gap-2">
+              <span className="text-t2">{row.name}</span>
+              <span className="text-right">{row.read}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-1.5 text-t3">{UNSUPPORTED_NOTE}.</p>
+      </details>
     </div>
   );
 }
@@ -79,13 +174,35 @@ export default function Sidebar() {
     toast,
     drawer,
     sceneGeo,
-    restoreScene
+    restoreScene,
+    aoi,
+    resetAoi,
+    segmentMode,
+    setSegmentMode,
+    segment,
+    segBusy,
+    applySegment,
+    clearSegment
   } = useApp();
   const georef = isGeoreferenced(sceneGeo);
   const bandsOn = bands.filter((b) => b.on).length;
+  const panelRef = useRef(null);
+  const isDesktop = useMedia('(min-width: 1024px)');
+  const asDrawer = !isDesktop && drawer === 'imagery';
+  const offscreen = !isDesktop && drawer !== 'imagery';
+  useFocusTrap(panelRef, asDrawer);
+  const centroid = aoiCentroid(aoi, sceneGeo);
+  const aoiArea = aoiAreaKm2(aoi, sceneGeo);
 
   return (
     <aside
+      ref={panelRef}
+      id="imagery-panel"
+      aria-label="imagery rail"
+      role={asDrawer ? 'dialog' : undefined}
+      aria-modal={asDrawer ? 'true' : undefined}
+      aria-hidden={offscreen || undefined}
+      inert={offscreen ? '' : undefined}
       className={`fixed bottom-0 left-0 top-14 z-40 flex w-[290px] max-w-[86vw] shrink-0 flex-col border-r hair bg-panel transition-transform duration-200 lg:relative lg:inset-auto lg:z-auto lg:translate-x-0 ${
         drawer === 'imagery' ? 'translate-x-0' : '-translate-x-full'
       }`}
@@ -104,9 +221,25 @@ export default function Sidebar() {
                   {opticalFile.file}
                 </span>
                 <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-t3">
-                  {opticalFile.label}
+                  {opticalFile.uploaded ? opticalFile.formatLabel || opticalFile.label : opticalFile.label}
                 </span>
               </div>
+              {opticalFile.uploaded && (opticalFile.notes?.length > 0 || opticalFile.georef) && (
+                <div className="rounded-md border hair bg-recess/60 px-2 py-1.5 text-[10px] leading-4 text-t3">
+                  {opticalFile.georef?.status === 'georeferenced' ? (
+                    <span className="text-accent">
+                      {opticalFile.georef.crs} · footprint from {opticalFile.georef.source}
+                    </span>
+                  ) : (
+                    <span className="text-warn">no CRS in this file — geodesy features are off</span>
+                  )}
+                  {opticalFile.notes?.slice(0, 3).map((n) => (
+                    <span key={n} className="block truncate">
+                      {n}
+                    </span>
+                  ))}
+                </div>
+              )}
               <div className="flex items-center gap-2 text-[11.5px] text-t2">
                 <Dot tone="live" />
                 <span className="truncate font-mono text-[11px] text-t1">{SCENES.sar.file}</span>
@@ -186,19 +319,69 @@ export default function Sidebar() {
             <span className="lbl">AOI</span>
             <span className="data-mono text-t3">{georef ? sceneGeo.crs : 'no CRS'}</span>
           </div>
-          <button
-            onClick={() => {
-              setDrawMode(!drawMode);
-              toast(drawMode ? 'AOI draw cancelled' : 'click the scene to place AOI vertices · Enter closes');
-            }}
-            aria-pressed={drawMode}
-            className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] font-medium transition-colors ${
-              drawMode ? 'bg-accent/15 text-accent' : 'text-accent hover:bg-accent/10'
-            }`}
-          >
-            <Icon name="crosshair" size={13} />
-            {drawMode ? 'Drawing… click scene' : 'Draw AOI'}
-          </button>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => {
+                setSegmentMode(!segmentMode);
+                toast(
+                  segmentMode
+                    ? 'segment mode off'
+                    : 'click the region you mean — AVNI grows a mask and traces its outline'
+                );
+              }}
+              aria-pressed={segmentMode}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] font-medium transition-colors ${
+                segmentMode ? 'bg-accent/15 text-accent' : 'text-accent hover:bg-accent/10'
+              }`}
+            >
+              <Icon name="crosshair" size={13} />
+              {segmentMode ? 'Segmenting… click region' : 'Segment region'}
+            </button>
+            <button
+              onClick={() => {
+                setDrawMode(!drawMode);
+                toast(drawMode ? 'AOI draw cancelled' : 'click the scene to place AOI vertices · Enter closes');
+              }}
+              aria-pressed={drawMode}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] font-medium transition-colors ${
+                drawMode ? 'bg-accent/15 text-accent' : 'text-t2 hover:bg-white/5 hover:text-t1'
+              }`}
+            >
+              <Icon name="pen" size={13} />
+              {drawMode ? 'Drawing…' : 'Draw polygon'}
+            </button>
+            <button
+              onClick={resetAoi}
+              title="restore the AOI to the scene default"
+              className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-[11.5px] font-medium text-t3 transition-colors hover:bg-white/5 hover:text-t1"
+            >
+              <Icon name="refresh" size={12} />
+              Reset
+            </button>
+          </div>
+
+          {(segmentMode || segment) && (
+            <div className="mt-2 rounded-md border border-accent/30 bg-accent/5 px-2 py-1.5 text-[10.5px] leading-4 text-t2">
+              {segBusy
+                ? 'growing region from the seed…'
+                : segment
+                  ? `${segment.stats.outlineVertices} vertices · ${(segment.stats.coverage * 100).toFixed(1)}% of the scene${stopNote(segment) ? ` · ${stopNote(segment)}` : ''}`
+                  : 'click a region on the scene · shift adds · alt subtracts'}
+              {segment && (
+                <span className="mt-1 flex gap-1.5">
+                  <button
+                    onClick={applySegment}
+                    className="rounded bg-accent/15 px-1.5 py-0.5 font-medium text-accent"
+                  >
+                    Use as AOI
+                  </button>
+                  <button onClick={clearSegment} className="rounded px-1.5 py-0.5 text-t3 hover:text-t1">
+                    Clear
+                  </button>
+                </span>
+              )}
+            </div>
+          )}
           <div className="mt-2 space-y-0.5 text-[10.5px] leading-4 text-t3">
             {georef ? (
               <>
@@ -209,6 +392,13 @@ export default function Sidebar() {
                   {fmtLon(sceneGeo.extent.minLon)}–{fmtLon(sceneGeo.extent.maxLon)}
                 </div>
                 <div>{gsdLabel(sceneGeo.extent, opticalFile.raster)} · declared footprint</div>
+                <div className="data-mono" title="derived from the drawn AOI ring, WGS84">
+                  AOI {aoiArea.toFixed(1)} km² · {fmtLat(centroid.lat)} {fmtLon(centroid.lon)}
+                </div>
+                <div className="data-mono" title="Snyder forward transverse Mercator, checked against PROJ">
+                  UTM {utmBlock(centroid.lat, centroid.lon).zone} ·{' '}
+                  {utmBlock(centroid.lat, centroid.lon).easting_m.toFixed(0)} E
+                </div>
               </>
             ) : (
               <>

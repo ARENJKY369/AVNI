@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Icon, AvniMark } from './Icons.jsx';
+import { useFocusTrap, useMedia } from '../lib/hooks.js';
 import Answer from './Answer.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { ABSTAIN_GATE } from '../lib/model.js';
@@ -146,10 +147,26 @@ function AttachDropzone() {
 }
 
 export default function QueryPanel() {
-  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast, drawer, sceneGeo } =
-    useApp();
+  const {
+    queries,
+    sendQuery,
+    attachOpen,
+    setAttachOpen,
+    sceneB,
+    detachSceneB,
+    toast,
+    drawer,
+    sceneGeo,
+    aoi,
+    setHelp
+  } = useApp();
   const [text, setText] = useState('');
   const scrollRef = useRef(null);
+  const panelRef = useRef(null);
+  const isDesktop = useMedia('(min-width: 1024px)');
+  const asDrawer = !isDesktop && drawer === 'query';
+  const offscreen = !isDesktop && drawer !== 'query';
+  useFocusTrap(panelRef, asDrawer);
   // follow new messages only while the reader is already at the bottom: the
   // old effect yanked them back down on every analysis stage tick
   const pinned = useRef(true);
@@ -181,7 +198,14 @@ export default function QueryPanel() {
 
   return (
     <aside
-      className={`fixed bottom-0 right-0 top-14 z-40 flex w-[380px] max-w-[92vw] shrink-0 flex-col border-l hair bg-panel transition-transform duration-200 lg:relative lg:inset-auto lg:z-auto lg:translate-x-0 ${
+      ref={panelRef}
+      id="query-panel"
+      aria-label="query panel"
+      role={asDrawer ? 'dialog' : undefined}
+      aria-modal={asDrawer ? 'true' : undefined}
+      aria-hidden={offscreen || undefined}
+      inert={offscreen ? '' : undefined}
+      className={`no-print fixed bottom-0 right-0 top-14 z-40 flex w-[380px] max-w-[92vw] shrink-0 flex-col border-l hair bg-panel transition-transform duration-200 lg:relative lg:inset-auto lg:z-auto lg:translate-x-0 ${
         drawer === 'query' ? 'translate-x-0' : 'translate-x-full'
       }`}
     >
@@ -195,7 +219,7 @@ export default function QueryPanel() {
               title="export session report · Markdown"
               aria-label="export session report"
               onClick={() => {
-                exportSessionMarkdown(queries, sceneGeo);
+                exportSessionMarkdown(queries, sceneGeo, aoi);
                 toast('session report exported · Markdown');
               }}
             >
@@ -212,6 +236,7 @@ export default function QueryPanel() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
+        role="log"
         aria-live="polite"
         aria-label="answer stream"
         className="flex-1 overflow-y-auto px-4 py-4"
@@ -281,6 +306,8 @@ export default function QueryPanel() {
               }
             }}
             placeholder="Ask the scene — flood, growth, vegetation…"
+            autoComplete="off"
+            enterKeyHint="send"
             className="min-w-0 flex-1 bg-transparent text-[12px] text-t1 placeholder:text-t3 focus:outline-none"
           />
           <button
@@ -288,7 +315,7 @@ export default function QueryPanel() {
             className={`icon-btn !h-7 !w-7 ${attachOpen ? 'icon-btn-on' : ''}`}
             title="attach second scene"
             aria-label="attach second scene"
-            aria-pressed={attachOpen}
+            aria-expanded={attachOpen}
           >
             <Icon name="paperclip" size={14} />
           </button>
@@ -310,12 +337,14 @@ export default function QueryPanel() {
           >
             attach a second scene for optical/SAR cross-check
           </button>
-          <span
-            className="ml-auto flex h-4 w-4 shrink-0 items-center justify-center rounded-full border border-edge text-t3"
-            title={`AVNI-VL 0.9 · abstain gate ${ABSTAIN_GATE}`}
+          <button
+            className="ml-auto flex shrink-0 items-center gap-1 rounded-full border border-edge px-1.5 py-0.5 text-t3 transition-colors hover:border-accent/40 hover:text-accent"
+            title={`AVNI-VL 0.9 · abstain gate ${ABSTAIN_GATE} · press ? for the console guide`}
+            onClick={() => setHelp(true)}
           >
             <Icon name="info" size={9} />
-          </span>
+            ? guide
+          </button>
         </div>
       </div>
     </aside>

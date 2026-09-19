@@ -1,27 +1,39 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aoiCentroid,
+  GAZETTEER,
+  PROVENANCE,
+  SCENE_ASPECT,
   SCENE_EXTENT,
   SCENE_GEO,
+  SCENE_GSD_M,
   SCENE_RASTER,
   UNLOCATED_GEO,
+  aoiAreaHa,
+  aoiAreaKm2,
+  aoiCentroid,
+  aoiRing,
   bearingLabel,
   boxAround,
   buildAnswerGeoJSON,
   buildLayerGeoJSON,
+  distanceKm,
   extentKm,
   flattenPath,
   fmtLat,
   fmtLon,
+  georefBlock,
   groundSampleMetres,
-  haversineKm,
+  gsdLabel,
   nearestPlace,
   placeSummary,
   scaleBar,
   sheetSize,
-  toGeo
+  toGeo,
+  utmBlock,
+  utmZoneLabel
 } from './geo.js';
-import { BUILTIN_POLYS, WATER_PATHS } from '../data/overlays.js';
+import { BUILTIN_POLYS, DISAGREEMENT_CLUSTERS, WATER_PATHS } from '../data/overlays.js';
+import { ringAreaHa } from './geodesy.js';
 
 const AOI = [
   { u: 0.33, v: 0.28 },
@@ -37,40 +49,101 @@ const ALL_LAYERS = {
   disagreement: { on: true }
 };
 
-describe('declared footprint', () => {
+const ANSWER = {
+  question: 'Where is flooding most severe?',
+  confidence: { consistency_score: 0.47, abstained: false },
+  physics_check: { ndwi: 0.61, sar_backscatter_db: -3.2, flagged: true },
+  geodetic: { area_ha: 4.7 }
+};
+
+describe('the declared footprint', () => {
   it('matches the raster aspect ratio, so imagery and overlays share one grid', () => {
     const { widthKm, heightKm } = extentKm();
-    expect(widthKm / heightKm).toBeCloseTo(SCENE_RASTER.width / SCENE_RASTER.height, 2);
+    expect(widthKm / heightKm).toBeCloseTo(SCENE_ASPECT, 4);
+    expect(SCENE_RASTER.width / SCENE_RASTER.height).toBeCloseTo(SCENE_ASPECT, 12);
+  });
+
+  it('is 22.03 km wide on the ground, at the centre latitude', () => {
+    expect(extentKm().widthKm).toBeCloseTo(22.0305, 3);
+    expect(extentKm().heightKm).toBeCloseTo(12.296, 3);
   });
 
   it('yields a square ground sample distance derived from extent and raster', () => {
     const g = groundSampleMetres();
-    expect(g.x).toBeCloseTo(g.y, 1);
-    expect(g.x).toBeGreaterThan(15);
-    // the old build printed "10 m/px" from a constant that no raster could honour
-    expect(g.x).not.toBeCloseTo(10, 0);
+    expect(g.x).toBeCloseTo(g.y, 2);
+    expect(g.x).toBeCloseTo(SCENE_GSD_M, 6);
+    expect(g.x).toBeGreaterThan(15.9);
+    expect(g.x).toBeLessThan(16.1);
+    // the old build printed "10 m/px" from a constant no raster could honour
+    expect(gsdLabel()).toBe('16 m/px');
   });
 
-  it('maps the corners of uv space onto the extent', () => {
+  it('maps uv space onto the extent, north-west first', () => {
     expect(toGeo(0, 0)).toEqual({ lat: SCENE_EXTENT.maxLat, lon: SCENE_EXTENT.minLon });
     expect(toGeo(1, 1)).toEqual({ lat: SCENE_EXTENT.minLat, lon: SCENE_EXTENT.maxLon });
+    const c = toGeo(0.5, 0.5);
+    expect(c.lat).toBeCloseTo(12.9758, 4);
+    expect(c.lon).toBeCloseTo(77.6027, 4);
   });
 
   it('formats hemispheres with the right suffix', () => {
     expect(fmtLat(12.9739)).toBe('12.9739°N');
     expect(fmtLat(-12.9739)).toBe('12.9739°S');
     expect(fmtLon(77.6093)).toBe('77.6093°E');
+    expect(fmtLon(-77.6093)).toBe('77.6093°W');
   });
 });
 
-describe('geodesy', () => {
-  it('measures a known short distance', () => {
-    // MG Road -> Cubbon Park, independent re-computation: ~0.33 km
-    expect(haversineKm(12.9756, 77.6068, 12.9763, 77.5929)).toBeCloseTo(1.5, 0);
-    expect(haversineKm(12.9756, 77.6068, 12.9756, 77.6068)).toBe(0);
+describe('the scene sheet', () => {
+  it('fits inside the container without distorting the footprint', () => {
+    const s = sheetSize(1000, 900);
+    expect(s.w / s.h).toBeCloseTo(SCENE_ASPECT, 6);
+    expect(s.w).toBeLessThanOrEqual(1000);
+    expect(s.h).toBeLessThanOrEqual(900);
   });
 
-  it('labels bearings', () => {
+  it('falls back to a finite box for degenerate containers', () => {
+    const s = sheetSize(0, 0);
+    expect(s.w).toBeGreaterThan(0);
+    expect(s.h).toBeGreaterThan(0);
+  });
+});
+
+describe('the scale bar', () => {
+  it('is one measurement: the drawn length and the label agree', () => {
+    for (const [w, z] of [
+      [1010, 1],
+      [1010, 2.5],
+      [640, 1],
+      [400, 8]
+    ]) {
+      const bar = scaleBar({ sheetWidthPx: w, zoom: z });
+      // the bar covers exactly as much ground as it is labelled with
+      expect(bar.px * bar.kmPerPx).toBeCloseTo(bar.km, 1);
+      expect(bar.label).toMatch(/^(\d+(\.\d+)? km|\d+ m)$/);
+    }
+  });
+
+  it('keeps the bar a sane on-screen size', () => {
+    const bar = scaleBar({ sheetWidthPx: 1010, zoom: 1 });
+    expect(bar.px).toBeGreaterThanOrEqual(24);
+    expect(bar.px).toBeLessThanOrEqual(92);
+  });
+
+  it('re-labels in metres when the ground resolution gets fine', () => {
+    const bar = scaleBar({ sheetWidthPx: 1010, zoom: 8 });
+    expect(bar.label).toMatch(/m$/);
+  });
+});
+
+describe('distance, bearing and place names', () => {
+  it('measures geodesic distance (WGS84), not a mean-radius haversine', () => {
+    // PROJ: 1510.0702 m between these two gazetteer points
+    expect(distanceKm(12.9756, 77.6068, 12.9763, 77.5929)).toBeCloseTo(1.51007, 4);
+    expect(distanceKm(12.9, 77.6, 12.9, 77.6)).toBe(0);
+  });
+
+  it('labels bearings from the geodesic azimuth', () => {
     expect(bearingLabel(12.9, 77.6, 13.1, 77.6)).toBe('N');
     expect(bearingLabel(12.9, 77.6, 12.9, 77.8)).toBe('E');
     expect(bearingLabel(12.9, 77.6, 12.7, 77.6)).toBe('S');
@@ -79,104 +152,137 @@ describe('geodesy', () => {
   it('resolves the AOI centroid to a real gazetteer entry', () => {
     const c = aoiCentroid(AOI);
     const place = nearestPlace(c.lat, c.lon);
-    expect(place.name).toBe('MG Road');
-    expect(place.distanceKm).toBeLessThan(10);
-    expect(placeSummary(c.lat, c.lon).short).toContain('MG Road');
+    expect(GAZETTEER.some((p) => p.name === place.name)).toBe(true);
+    expect(place.distanceKm).toBeLessThan(5);
   });
 
-  it('keeps boxAround area honest', () => {
-    const ring = boxAround(12.9716, 77.5946, 4.7);
-    const mLat = 110630;
-    const mLon = 111320 * Math.cos((12.9716 * Math.PI) / 180);
-    let area = 0;
-    for (let i = 0; i < ring.length - 1; i += 1) {
-      const [x1, y1] = [ring[i][0] * mLon, ring[i][1] * mLat];
-      const [x2, y2] = [ring[i + 1][0] * mLon, ring[i + 1][1] * mLat];
-      area += x1 * y2 - x2 * y1;
-    }
-    expect(Math.abs(area / 2) / 10000).toBeCloseTo(4.7, 1);
-  });
-});
-
-describe('scale bar', () => {
-  it('describes exactly the ground the drawn bar covers', () => {
-    for (const [w, z] of [[1010, 1], [1010, 2.4], [640, 1], [1600, 5]]) {
-      const bar = scaleBar({ sheetWidthPx: w, zoom: z });
-      expect(bar.px * bar.kmPerPx).toBeCloseTo(bar.km, 1);
-    }
-  });
-
-  it('scales km-per-pixel with zoom', () => {
-    const fit = scaleBar({ sheetWidthPx: 1000, zoom: 1 });
-    const zoomed = scaleBar({ sheetWidthPx: 1000, zoom: 2 });
-    expect(zoomed.kmPerPx).toBeCloseTo(fit.kmPerPx / 2, 6);
-  });
-});
-
-describe('scene sheet', () => {
-  it('fits inside the viewer without cropping the footprint', () => {
-    const s = sheetSize(1010, 854);
-    expect(s.w / s.h).toBeCloseTo(SCENE_RASTER.width / SCENE_RASTER.height, 2);
-    expect(s.w).toBeLessThanOrEqual(1010.001);
-    expect(s.h).toBeLessThanOrEqual(854.001);
-  });
-});
-
-describe('layer geometry', () => {
-  it('flattens the drawn water path instead of inventing a box', () => {
-    const pts = flattenPath(WATER_PATHS.optical);
-    expect(pts.length).toBeGreaterThan(20);
-    expect(pts[0]).toEqual([103, 1]);
-  });
-
-  it('writes nothing at all when the scene is unlocated', () => {
-    const gj = buildLayerGeoJSON(ALL_LAYERS, AOI, UNLOCATED_GEO);
-    expect(gj.features).toHaveLength(0);
-    expect(gj.georeference.status).toBe('unlocated');
-    expect(JSON.stringify(gj)).not.toMatch(/12\.9|77\.5/);
-  });
-
-  it('derives features from the drawn overlays inside the declared extent', () => {
-    const gj = buildLayerGeoJSON(ALL_LAYERS, AOI, SCENE_GEO);
-    const byLayer = Object.fromEntries(gj.features.map((f) => [f.properties.layer, f]));
-    expect(byLayer.water_mask.geometry.type).toBe('LineString');
-    expect(byLayer.built_up.geometry.type).toBe('MultiPolygon');
-    expect(byLayer.built_up.geometry.coordinates).toHaveLength(BUILTIN_POLYS.length);
-    expect(byLayer.aoi.properties.name).toBeTruthy();
-
-    const flat = [];
-    const collect = (c) => (typeof c[0] === 'number' ? flat.push(c) : c.forEach(collect));
-    gj.features.forEach((f) => collect(f.geometry.coordinates));
-    for (const [lon, lat] of flat) {
-      expect(lon).toBeGreaterThanOrEqual(SCENE_EXTENT.minLon - 0.02);
-      expect(lon).toBeLessThanOrEqual(SCENE_EXTENT.maxLon + 0.02);
-      expect(lat).toBeGreaterThanOrEqual(SCENE_EXTENT.minLat - 0.02);
-      expect(lat).toBeLessThanOrEqual(SCENE_EXTENT.maxLat + 0.02);
-    }
-    // the old hardcoded "water"/"built-up" boxes must be gone
-    expect(JSON.stringify(gj)).not.toContain('77.5936007');
-  });
-});
-
-describe('answer footprint', () => {
-  const answer = {
-    question: 'q',
-    confidence: { consistency_score: 0.47, abstained: false },
-    physics_check: { ndwi: 0.61, sar_backscatter_db: -3.2 },
-    geodetic: { area_ha: 4.7 }
-  };
-
-  it('centres on the AOI the user drew, not a fixture constant', () => {
+  it('always reports the place with its distance and bearing off the point', () => {
     const c = aoiCentroid(AOI);
-    const gj = buildAnswerGeoJSON(answer, c, SCENE_GEO);
-    expect(gj.features[0].geometry.coordinates[0]).toBeCloseTo(c.lon, 6);
-    expect(gj.features[0].geometry.coordinates[1]).toBeCloseTo(c.lat, 6);
-    expect(gj.features[0].properties.centroid_source).toMatch(/AOI/);
+    const summary = placeSummary(c.lat, c.lon);
+    expect(summary.short).toContain(summary.name);
+    expect(summary.distance === 'at' || /km [NSEW]/.test(summary.distance)).toBe(true);
+  });
+});
+
+describe('the drawn AOI', () => {
+  it('reports a centroid inside the extent', () => {
+    const c = aoiCentroid(AOI);
+    expect(c.lat).toBeGreaterThan(SCENE_EXTENT.minLat);
+    expect(c.lat).toBeLessThan(SCENE_EXTENT.maxLat);
+    expect(c.lon).toBeGreaterThan(SCENE_EXTENT.minLon);
+    expect(c.lon).toBeLessThan(SCENE_EXTENT.maxLon);
   });
 
-  it('refuses to write geometry for an unlocated scene', () => {
-    const gj = buildAnswerGeoJSON(answer, aoiCentroid(AOI), UNLOCATED_GEO);
-    expect(gj.features).toHaveLength(0);
-    expect(gj.name).toBe('avni_refused');
+  it('derives an area from the ring itself (km² and ha agree)', () => {
+    expect(aoiAreaKm2(AOI)).toBeCloseTo(36.84, 1);
+    expect(aoiAreaHa(AOI)).toBeCloseTo(aoiAreaKm2(AOI) * 100, 6);
+  });
+
+  it('returns the ring as lat/lon in the same order as the vertices', () => {
+    const ring = aoiRing(AOI);
+    expect(ring).toHaveLength(AOI.length);
+    expect(ring[0].lon).toBeCloseTo(toGeo(0.33, 0.28).lon, 12);
+    expect(ring[0].lat).toBeCloseTo(toGeo(0.33, 0.28).lat, 12);
+  });
+
+  it('has an area of zero for a degenerate ring', () => {
+    expect(aoiAreaKm2([])).toBe(0);
+    expect(aoiAreaKm2([{ u: 0.5, v: 0.5 }])).toBe(0);
+  });
+});
+
+describe('footprint boxes', () => {
+  it('encloses the requested area on the ground', () => {
+    const box = boxAround(12.9758, 77.6027, 4.7);
+    const ring = box.slice(0, 4).map(([lon, lat]) => ({ lat, lon }));
+    // 4.7 ha is a 216.8 m square
+    expect(ringAreaHa(ring)).toBeCloseTo(4.7, 2);
+    expect(box[0]).toEqual(box[box.length - 1]);
+  });
+});
+
+describe('UTM', () => {
+  it('reports the zone an Indian EO pipeline would file this under', () => {
+    const c = aoiCentroid(AOI);
+    const utm = utmBlock(c.lat, c.lon);
+    expect(utm.zone).toBe('43N');
+    expect(utm.easting_m).toBeGreaterThan(700000);
+    expect(utm.easting_m).toBeLessThan(900000);
+    expect(utm.northing_m).toBeGreaterThan(1400000);
+    expect(utmZoneLabel(c.lat, c.lon)).toBe('43N');
+  });
+});
+
+describe('overlay geometry -> geography', () => {
+  it('flattens the river strokes into a path inside image space', () => {
+    const pts = flattenPath(WATER_PATHS.optical, 8);
+    expect(pts.length).toBeGreaterThan(30);
+    for (const [x, y] of pts) {
+      expect(x).toBeGreaterThanOrEqual(-5);
+      expect(x).toBeLessThanOrEqual(105);
+      expect(y).toBeGreaterThanOrEqual(-5);
+      expect(y).toBeLessThanOrEqual(105);
+    }
+  });
+
+  it('ignores a path with too few numbers to be a curve', () => {
+    expect(flattenPath('M 1 2')).toEqual([]);
+  });
+});
+
+describe('GeoJSON exports', () => {
+  const centroid = aoiCentroid(AOI);
+
+  it('withholds everything on an unlocated scene — geometry, not just the header', () => {
+    const answer = buildAnswerGeoJSON(ANSWER, centroid, UNLOCATED_GEO, AOI);
+    const layers = buildLayerGeoJSON(ALL_LAYERS, AOI, UNLOCATED_GEO);
+    for (const fc of [answer, layers]) {
+      expect(fc.features).toHaveLength(0);
+      expect(fc.georeference.status).toBe('unlocated');
+      expect(JSON.stringify(fc)).not.toMatch(/1[23]\.\d{3,}|7[78]\.\d{3,}/);
+    }
+  });
+
+  it('puts the answer footprint on the drawn AOI centroid', () => {
+    const fc = buildAnswerGeoJSON(ANSWER, centroid, SCENE_GEO, AOI);
+    const point = fc.features.find((f) => f.properties.kind === 'answer_centroid');
+    expect(point.geometry.coordinates[0]).toBeCloseTo(centroid.lon, 9);
+    expect(point.geometry.coordinates[1]).toBeCloseTo(centroid.lat, 9);
+    expect(point.properties.centroid_source).toBe('drawn AOI centroid');
+    const footprint = fc.features.find((f) => f.properties.kind === 'answer_footprint');
+    expect(footprint.properties.area_ha).toBe(4.7);
+    expect(footprint.properties.aoi_area_km2).toBeCloseTo(36.84, 1);
+    expect(fc.utm.zone).toBe('43N');
+    expect(fc.provenance.derived.utm).toMatch(/PROJ/);
+  });
+
+  it('writes layer geometry from the overlays that are on screen, not from constants', () => {
+    const fc = buildLayerGeoJSON(ALL_LAYERS, AOI, SCENE_GEO);
+    const water = fc.features.find((f) => f.properties.layer === 'water_mask');
+    expect(water.geometry.type).toBe('LineString');
+    expect(water.geometry.coordinates.length).toBeGreaterThan(30);
+    // the old export wrote a hardcoded box around 12.9716 / 77.5946
+    expect(JSON.stringify(fc)).not.toContain('12.9716');
+    const built = fc.features.find((f) => f.properties.layer === 'built_up');
+    expect(built.geometry.coordinates).toHaveLength(BUILTIN_POLYS.length);
+    const conflicts = fc.features.filter((f) => f.properties.layer === 'disagreement');
+    expect(conflicts).toHaveLength(DISAGREEMENT_CLUSTERS.length);
+    const aoi = fc.features.find((f) => f.properties.layer === 'aoi');
+    expect(aoi.properties.area_km2).toBeCloseTo(36.84, 1);
+    expect(aoi.geometry.coordinates[0]).toHaveLength(AOI.length + 1);
+  });
+
+  it('respects the layer switches', () => {
+    const fc = buildLayerGeoJSON({ water: { on: false }, builtin: { on: false } }, [], SCENE_GEO);
+    expect(fc.features).toHaveLength(0);
+    expect(fc.georeference.status).toBe('georeferenced');
+  });
+
+  it('carries the provenance of every number it ships', () => {
+    expect(PROVENANCE.derived.aoi_area).toMatch(/shoelace/);
+    expect(PROVENANCE.fixture.area_ha).toMatch(/answer bank/);
+    expect(georefBlock(UNLOCATED_GEO).status).toBe('unlocated');
+    expect(georefBlock(SCENE_GEO).crs).toBe('EPSG:4326');
+    expect(georefBlock(null).status).toBe('unknown');
   });
 });

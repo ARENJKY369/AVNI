@@ -5,17 +5,24 @@
 // CRS, no coordinates are written, anywhere. (The JSON bundle used to spread
 // the payload back over the withheld block, which leaked lat/lon into a file
 // whose own header said "unlocated".)
+//
+// Every bundle also carries its PROVENANCE block: which numbers were derived
+// from the scene and which came from the analysis-service fixtures.
 
 import {
+  PROVENANCE,
+  aoiAreaKm2,
   buildAnswerGeoJSON,
   downloadJSON,
   fmtLat,
   fmtLon,
   georefBlock,
+  gsdLabel,
   isGeoreferenced,
+  utmBlock,
   withheldGeodetic
 } from './geo.js';
-import { ABSTAIN_GATE } from './model.js';
+import { ABSTAIN_GATE, ORIENTATIONS } from './model.js';
 
 export function downloadText(text, filename, mime = 'text/markdown') {
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
@@ -36,7 +43,21 @@ const slug = (s) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 40) || 'result';
 
-export function exportAnswerJSON(payload, geo) {
+const geodeticBlock = (payload, geo, centroid, aoiPoints) => {
+  if (!isGeoreferenced(geo)) return withheldGeodetic(geo);
+  return {
+    area_ha: payload.geodetic.area_ha,
+    area_source: 'analysis-service fixture, centred on the derived AOI centroid',
+    crs: geo.crs,
+    source: geo.source,
+    centroid: centroid ? { ...centroid, source: 'drawn AOI centroid' } : null,
+    aoi_area_km2: aoiPoints?.length > 2 ? Number(aoiAreaKm2(aoiPoints, geo).toFixed(4)) : null,
+    aoi_area_source: 'derived from the drawn AOI ring',
+    utm: centroid ? utmBlock(centroid.lat, centroid.lon) : null
+  };
+};
+
+export function exportAnswerJSON(payload, geo, centroid, aoiPoints) {
   const georef = isGeoreferenced(geo);
   // Built explicitly rather than spread: the withheld block can never be
   // overwritten by a stray field from the payload.
@@ -47,17 +68,38 @@ export function exportAnswerJSON(payload, geo) {
     question: payload.question,
     intent: payload.intent,
     answer_text: payload.answer_text,
-    confidence: payload.confidence,
+    consistency: {
+      ...payload.confidence,
+      gate: ABSTAIN_GATE,
+      orientations: ORIENTATIONS
+    },
     physics_check: payload.physics_check,
     trace: payload.trace,
     georeference: georefBlock(geo),
-    geodetic: georef ? { ...payload.geodetic, crs: geo.crs, source: geo.source } : withheldGeodetic(geo),
+    geodetic: geodeticBlock(payload, geo, centroid, aoiPoints),
+    scene: {
+      ground_sample_distance: georef ? gsdLabel(geo.extent) : null,
+      ground_sample_distance_source: PROVENANCE.derived.ground_sample_distance
+    },
+    provenance: PROVENANCE,
     followups: payload.followups
   };
   downloadJSON(bundle, `avni_result_${slug(payload.question)}.json`, 'application/json');
 }
 
-function answerMarkdown(p, geo) {
+const provenanceTable = () =>
+  [
+    '### Where these numbers come from',
+    '',
+    '| derived from the scene | fixture (mock analysis service) |',
+    '| --- | --- |',
+    `| ${PROVENANCE.derived.scale_bar} | ${PROVENANCE.fixture.answer_text} |`,
+    `| ${PROVENANCE.derived.aoi_area} | ${PROVENANCE.fixture.area_ha} |`,
+    `| ${PROVENANCE.derived.utm} | ${PROVENANCE.fixture.physics_check} |`,
+    ''
+  ].join('\n');
+
+function answerMarkdown(p, geo, centroid, aoiPoints) {
   const georef = isGeoreferenced(geo);
   const c = p.confidence;
   const pc = p.physics_check;
@@ -65,9 +107,11 @@ function answerMarkdown(p, geo) {
   const lines = [];
   lines.push(`## Q · ${p.question}`, '');
   if (c.abstained) {
-    lines.push(`**DECLINED TO ANSWER** — consistency ${c.consistency_score.toFixed(2)} (gate < ${ABSTAIN_GATE})`);
+    lines.push(
+      `**DECLINED TO ANSWER** — consistency ${c.consistency_score.toFixed(2)} (gate < ${ABSTAIN_GATE})`
+    );
     lines.push(`> ${c.reason}`, '');
-    lines.push(`AVNI ran the full pass but held the answer at the gate.`, '');
+    lines.push('AVNI ran the full pass but held the answer at the gate.', '');
   } else {
     lines.push(p.answer_text, '');
     lines.push(`**Consistency ${c.consistency_score.toFixed(2)}** — ${c.reason}`, '');
@@ -76,45 +120,56 @@ function answerMarkdown(p, geo) {
   lines.push(`- NDWI: \`${pc.ndwi.toFixed(2)}\` (water gate 0.45)`);
   lines.push(`- σ0 backscatter: \`${pc.sar_backscatter_db.toFixed(1)} dB\``);
   lines.push(`- Verdict: ${pc.verdict}`, '');
-  lines.push(`### Geodetic`);
+  lines.push('### Geodetic');
   if (georef) {
-    lines.push(`- footprint area: \`${g.area_ha.toFixed(1)} ha\` (\`${geo.crs}\`)`);
-    lines.push(`- centroid: from the drawn AOI — see the GeoJSON footprint export`);
+    lines.push(`- footprint area: \`${g.area_ha.toFixed(1)} ha\` (fixture, ${geo.crs})`);
+    if (aoiPoints?.length > 2) {
+      lines.push(`- drawn AOI area: \`${aoiAreaKm2(aoiPoints, geo).toFixed(2)} km²\` (derived)`);
+    }
+    if (centroid) {
+      lines.push(`- centroid: ${fmtLat(centroid.lat)} ${fmtLon(centroid.lon)} — drawn AOI`);
+      const utm = utmBlock(centroid.lat, centroid.lon);
+      lines.push(
+        `- UTM: \`${utm.zone}\` \`${utm.easting_m.toFixed(0)} E\` \`${utm.northing_m.toFixed(0)} N\``
+      );
+    }
     lines.push(`- georeference: ${geo.source}`, '');
   } else {
     lines.push(`- **coordinates withheld** — scene is not georeferenced (${geo.source})`, '');
   }
-  lines.push(`### Execution trace`);
+  lines.push('### Execution trace');
   p.trace.forEach((t, i) => {
     lines.push(`${i + 1}. ${t.step} — _${t.source}_${t.value ? ` — \`${t.value}\`` : ''}`);
   });
   return lines.join('\n');
 }
 
-export function exportAnswerMarkdown(payload, geo) {
+export function exportAnswerMarkdown(payload, geo, centroid, aoiPoints) {
   const body = [
     '# AVNI · result report',
     '',
     `generated ${new Date().toISOString()} · model AVNI-VL 0.9 · SIH 26167 / SAC-ISRO`,
+    `scene georeference: ${georefBlock(geo).status}`,
     '',
-    answerMarkdown(payload, geo),
-    ''
+    answerMarkdown(payload, geo, centroid, aoiPoints),
+    '',
+    provenanceTable()
   ].join('\n');
   downloadText(body, `avni_result_${slug(payload.question)}.md`);
 }
 
 // One geometry path for the export menu, the geodetic row and the
 // "export footprint" follow-up action.
-export function exportAnswerGeoJSON(payload, geo, centroid) {
+export function exportAnswerGeoJSON(payload, geo, centroid, aoiPoints) {
   if (!isGeoreferenced(geo)) return false;
   downloadJSON(
-    buildAnswerGeoJSON(payload, centroid, geo),
+    buildAnswerGeoJSON(payload, centroid, geo, aoiPoints),
     `avni_answer_${slug(payload.question)}.geojson`
   );
   return true;
 }
 
-export function exportSessionMarkdown(queries, geo) {
+export function exportSessionMarkdown(queries, geo, aoiPoints) {
   const done = queries.filter((q) => q.status === 'done');
   const body = [
     '# AVNI · session report',
@@ -125,8 +180,9 @@ export function exportSessionMarkdown(queries, geo) {
     '',
     '---',
     '',
-    done.map((q) => answerMarkdown(q.payload, geo)).join('\n\n---\n\n'),
-    ''
+    done.map((q) => answerMarkdown(q.payload, geo, null, aoiPoints)).join('\n\n---\n\n'),
+    '',
+    provenanceTable()
   ].join('\n');
   downloadText(body, `avni_session_${new Date().toISOString().slice(0, 10)}.md`);
 }
