@@ -9,7 +9,11 @@ import { Dot } from './components/ui.jsx';
 function Toasts() {
   const { toasts } = useApp();
   return (
-    <div className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-1.5">
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 flex-col items-center gap-1.5"
+    >
       {toasts.map((t) => (
         <div key={t.id} className="recess toast-in flex items-center gap-2 px-3 py-1.5">
           <Dot tone="accent" />
@@ -20,15 +24,19 @@ function Toasts() {
   );
 }
 
+const isTypingTarget = (el) =>
+  !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable);
+
 function Shell() {
   const { tools, setMode, drawer, setDrawer } = useApp();
 
   // console-grade keyboard map: / talks to the scene, 1–4 flip display
-  // sources. Skipped while typing in a field.
+  // sources. Skipped while typing, and never with a modifier held — the map
+  // must not swallow browser shortcuts.
   useEffect(() => {
     const onKey = (e) => {
-      const tag = e.target && e.target.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (isTypingTarget(e.target)) return;
       if (e.key === '/') {
         e.preventDefault();
         document.getElementById('composer-input')?.focus();

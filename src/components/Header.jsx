@@ -35,7 +35,8 @@ export default function Header() {
   const exportLayers = () => {
     const gj = buildLayerGeoJSON(layers, aoi, sceneGeo);
     downloadJSON(gj, `avni_layers_${clock.replace(/[:Z]/g, '')}.geojson`);
-    toast('map layer exported · GeoJSON');
+    // an unlocated scene exports a refusal collection with no features
+    toast(gj.features.length ? 'map layer exported · GeoJSON' : 'layer export withheld · no georeference');
   };
 
   return (
@@ -44,6 +45,7 @@ export default function Header() {
       <button
         className={`icon-btn shrink-0 lg:hidden ${drawer === 'imagery' ? 'icon-btn-on' : ''}`}
         title="imagery panel"
+        aria-label="imagery panel"
         onClick={() => setDrawer(drawer === 'imagery' ? null : 'imagery')}
       >
         <Icon name="layers" size={16} />
@@ -55,7 +57,7 @@ export default function Header() {
         <div className="leading-none">
           <div className="flex items-baseline gap-2">
             <span className="text-[15px] font-bold tracking-wide text-t1">AVNI</span>
-            <span className="hidden font-mono text-[9px] text-t3 sm:inline">अवनि · the earth</span>
+            <span lang="hi" className="hidden font-mono text-[9px] text-t3 sm:inline">अवनि · the earth</span>
           </div>
           <div className="mt-1 text-[10px] text-t3">SIH 26167 · SAC/ISRO</div>
         </div>
@@ -104,7 +106,8 @@ export default function Header() {
 
         <button
           onClick={exportLayers}
-          title="download map layer · GeoJSON"
+          title={georef ? 'download map layer · GeoJSON' : 'download map layer · withheld, no georeference'}
+          aria-label="download map layer as GeoJSON"
           className="flex items-center gap-1.5 text-[11.5px] text-accent transition-opacity hover:opacity-80"
         >
           <Icon name="download" size={14} />
@@ -114,6 +117,7 @@ export default function Header() {
         <button
           className={`icon-btn shrink-0 lg:hidden ${drawer === 'query' ? 'icon-btn-on' : ''}`}
           title="query panel"
+          aria-label="query panel"
           onClick={() => setDrawer(drawer === 'query' ? null : 'query')}
         >
           <Icon name="comment" size={16} />

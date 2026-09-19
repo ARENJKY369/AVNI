@@ -68,6 +68,16 @@ body,
   height: 100%;
 }
 
+/* iOS Safari collapses the URL bar and the bottom composer would sit under
+   it; dvh tracks the real viewport where it is supported. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
+}
+
 body {
   @apply bg-ink text-t1 font-sans antialiased;
   font-feature-settings: 'cv02', 'cv03', 'ss01';

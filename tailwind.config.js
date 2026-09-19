@@ -13,7 +13,7 @@ export default {
         live: '#34D399',
         t1: '#E6EDF3',
         t2: '#8A97A6',
-        t3: '#5B6B7A'
+        t3: '#728293'
       },
       borderColor: {
         hair: 'rgba(255,255,255,0.08)'
