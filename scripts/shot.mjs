@@ -42,6 +42,47 @@ await new Promise((r) => setTimeout(r, 500));
 await page.screenshot({ path: 'shots/03-answer.png' });
 console.log('shot 03 ok');
 
+// open the export menu on the answer
+await page.evaluate(() => {
+  const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result'));
+  b && b.click();
+});
+await new Promise((r) => setTimeout(r, 400));
+await page.screenshot({ path: 'shots/07-export.png' });
+console.log('shot 07 ok');
+
+// exercise every export path and record what the browser downloads
+const client = await page.createCDPSession();
+const got = [];
+client.on('Browser.downloadWillBegin', (e) => got.push(e.suggestedFilename));
+await client.send('Browser.setDownloadBehavior', {
+  behavior: 'allow',
+  downloadPath: '/home/user/AVNI/shots/downloads',
+  eventsEnabled: true
+});
+for (const label of ['evidence bundle', 'analyst report', 'footprint']) {
+  await page.evaluate((l) => {
+    const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes(l));
+    b && b.click();
+  }, label);
+  await new Promise((r) => setTimeout(r, 500));
+  // reopen menu for next item
+  if (label !== 'footprint') {
+    await page.evaluate(() => {
+      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result'));
+      b && b.click();
+    });
+    await new Promise((r) => setTimeout(r, 300));
+  }
+}
+// session report from the query panel header
+await page.evaluate(() => {
+  const b = document.querySelector('button[title="export session report · Markdown"]');
+  b && b.click();
+});
+await new Promise((r) => setTimeout(r, 700));
+console.log('DOWNLOADS:', got.join(', '));
+
 // scroll the conversation so the physics callout + trace + geo row are visible
 await page.evaluate(() => {
   const scroller = document.querySelector('#composer-input').closest('aside').querySelector('.flex-1.overflow-y-auto');

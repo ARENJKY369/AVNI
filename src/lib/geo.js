@@ -128,9 +128,9 @@ export function buildLayerGeoJSON(layers, aoiPoints) {
   };
 }
 
-export function downloadJSON(obj, filename) {
+export function downloadJSON(obj, filename, mime = 'application/geo+json') {
   const blob = new Blob([JSON.stringify(obj, null, 2)], {
-    type: 'application/geo+json'
+    type: mime
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

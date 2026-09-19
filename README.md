@@ -34,6 +34,10 @@ npm run build      # production bundle in dist/
 - **Cross-modal + bi-temporal work** — attach a second epoch from the query
   panel to unlock CHANGE ΔT mode: a draggable swipe compare plus a causal
   attribution breakdown (seasonal vs shadow vs genuine change).
+- **Export everything** — per-answer "Export result" menu (JSON evidence
+  bundle, Markdown analyst report, GeoJSON footprint), a session-level
+  Markdown report from the query panel header, and layer export from the
+  app header.
 - **Field texture** — annotations, analyst comments, north arrow, scale bar,
   UTC session clock, toasts.
 

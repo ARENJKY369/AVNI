@@ -3,6 +3,7 @@ import { Icon, AvniMark } from './Icons.jsx';
 import Answer from './Answer.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { SUGGESTIONS } from '../data/mock.js';
+import { exportSessionMarkdown } from '../lib/export.js';
 
 function HeaderStatus() {
   const { queries } = useApp();
@@ -113,7 +114,7 @@ function AttachDropzone() {
 }
 
 export default function QueryPanel() {
-  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB } = useApp();
+  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast } = useApp();
   const [text, setText] = useState('');
   const scrollRef = useRef(null);
 
@@ -134,7 +135,21 @@ export default function QueryPanel() {
       {/* header */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b hair px-4">
         <span className="lbl">Query</span>
-        <HeaderStatus />
+        <div className="flex items-center gap-1.5">
+          {queries.some((q) => q.status === 'done') && (
+            <button
+              className="icon-btn !h-6 !w-6"
+              title="export session report · Markdown"
+              onClick={() => {
+                exportSessionMarkdown(queries);
+                toast('session report exported · Markdown');
+              }}
+            >
+              <Icon name="download" size={13} />
+            </button>
+          )}
+          <HeaderStatus />
+        </div>
       </div>
 
       <FloatingActions />

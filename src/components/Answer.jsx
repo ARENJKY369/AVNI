@@ -4,6 +4,50 @@ import { Ring, DbHistogram } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { ANALYZE_STAGES } from '../data/mock.js';
 import { buildAnswerGeoJSON, downloadJSON, fmtLat, fmtLon } from '../lib/geo.js';
+import { exportAnswerJSON, exportAnswerMarkdown } from '../lib/export.js';
+
+function ExportMenu({ payload }) {
+  const { toast } = useApp();
+  const [open, setOpen] = useState(false);
+  const item =
+    'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
+  const fire = (fn, msg) => () => {
+    fn(payload);
+    toast(msg);
+    setOpen(false);
+  };
+  return (
+    <div className="relative mb-2 flex justify-end">
+      <button className={`chip ${open ? '!border-accent/50 !text-t1' : ''}`} onClick={() => setOpen((o) => !o)}>
+        <Icon name="download" size={11} />
+        Export result
+        <Icon name="chevron" size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="recess absolute right-0 top-7 z-20 w-56 px-1.5 py-1.5">
+          <button className={item} onClick={fire(exportAnswerJSON, 'result exported · JSON evidence bundle')}>
+            <span className="data-mono w-12 text-t3">.json</span>
+            evidence bundle · full payload
+          </button>
+          <button className={item} onClick={fire(exportAnswerMarkdown, 'result exported · Markdown report')}>
+            <span className="data-mono w-12 text-t3">.md</span>
+            analyst report · readable
+          </button>
+          <button
+            className={item}
+            onClick={fire(
+              (p) => downloadJSON(buildAnswerGeoJSON(p), 'avni_answer.geojson'),
+              'result exported · GeoJSON footprint'
+            )}
+          >
+            <span className="data-mono w-12 text-t3">.geojson</span>
+            footprint · centroid + area
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function Analyzing({ stage }) {
   return (
@@ -180,6 +224,7 @@ export default function Answer({ q, onFollowup }) {
   const p = q.payload;
   return (
     <div className="answer-in">
+      <ExportMenu payload={p} />
       {!p.confidence.abstained && (
         <p className="text-[12.5px] leading-[19px] text-t1">{p.answer_text}</p>
       )}
