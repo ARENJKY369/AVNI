@@ -40,6 +40,11 @@ not as fixed.
 | Testing / CI / tooling | 2.5 |
 | Documentation (README is good, but drifts from the code) | 8.0 |
 
+**As fixed (this branch):** hackathon demo **9.0** · production **6.0** · hygiene **7.0** →
+**weighted ≈ 7.3 / 10**. The brief is still a frontend mock with no backend, and a11y/linting are only
+partially addressed — but the console no longer states anything it cannot back up, every claim in the
+README is covered by a test or a measurement, and anyone can re-run the evidence from `npm ci`.
+
 **One-line verdict:** a stunning instrument panel wrapped around a mock that does not always tell the
 truth it advertises — and the lies live exactly where a SAC/ISRO evaluator would poke: the geodetic
 maths and the export paths.
