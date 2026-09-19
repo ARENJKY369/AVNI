@@ -202,12 +202,12 @@ function GeodeticRow({ geo, payload }) {
     toast('GeoJSON written · answer footprint + centroid');
   };
   return (
-    <div className="mt-2.5 flex items-center gap-2 rounded-md border border-edge bg-recess px-3 py-2">
-      <Icon name="crosshair" size={12} className="text-t3" />
-      <span className="data-mono text-t2">
+    <div className="mt-2.5 flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-md border border-edge bg-recess px-3 py-2">
+      <Icon name="crosshair" size={12} className="shrink-0 text-t3" />
+      <span className="data-mono whitespace-nowrap text-t2">
         {fmtLat(geo.lat)} {fmtLon(geo.lon)}
       </span>
-      <span className="data-mono text-t3">{geo.area_ha.toFixed(1)} ha</span>
+      <span className="data-mono whitespace-nowrap text-t3">{geo.area_ha.toFixed(1)} ha</span>
       <button
         onClick={exportGeo}
         className="ml-auto flex items-center gap-1 whitespace-nowrap rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10.5px] font-semibold text-accent transition-colors hover:bg-accent/20"

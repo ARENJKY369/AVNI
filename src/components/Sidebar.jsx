@@ -65,11 +65,15 @@ function Dropzone() {
 }
 
 export default function Sidebar() {
-  const { bands, toggleBand, layers, toggleLayer, drawMode, setDrawMode, opticalFile, sceneB, toast } =
+  const { bands, toggleBand, layers, toggleLayer, drawMode, setDrawMode, opticalFile, sceneB, toast, drawer } =
     useApp();
 
   return (
-    <aside className="flex w-[290px] shrink-0 flex-col border-r hair bg-panel">
+    <aside
+      className={`fixed bottom-0 left-0 top-14 z-40 flex w-[290px] max-w-[86vw] shrink-0 flex-col border-r hair bg-panel transition-transform duration-200 lg:relative lg:inset-auto lg:z-auto lg:translate-x-0 ${
+        drawer === 'imagery' ? 'translate-x-0' : '-translate-x-full'
+      }`}
+    >
       <div className="flex-1 space-y-6 overflow-y-auto py-4">
         {/* IMAGERY */}
         <Section label="Imagery">
@@ -78,18 +82,18 @@ export default function Sidebar() {
             <div className="flex items-center gap-2 text-[11.5px] text-t2">
               <Dot tone="live" />
               <span className="truncate font-mono text-[11px] text-t1">{opticalFile.file}</span>
-              <span className="ml-auto text-[10px] text-t3">{opticalFile.label}</span>
+              <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-t3">{opticalFile.label}</span>
             </div>
             <div className="flex items-center gap-2 text-[11.5px] text-t2">
               <Dot tone="live" />
               <span className="truncate font-mono text-[11px] text-t1">{SCENES.sar.file}</span>
-              <span className="ml-auto text-[10px] text-t3">co-registered</span>
+              <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-t3">co-registered</span>
             </div>
             {sceneB && (
               <div className="flex items-center gap-2 text-[11.5px] text-t2">
                 <Dot tone="warn" />
                 <span className="truncate font-mono text-[11px] text-t1">{sceneB.file}</span>
-                <span className="ml-auto text-[10px] text-warn">ΔT epoch</span>
+                <span className="ml-auto shrink-0 whitespace-nowrap text-[10px] text-warn">ΔT epoch</span>
               </div>
             )}
           </div>

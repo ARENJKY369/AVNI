@@ -26,6 +26,17 @@ npm run build      # production bundle in dist/
   cancels), water / built-up / layover masks, and a disagreement overlay
   where optical and SAR classifications fight, colour-coded by conflict type
   (cloud occlusion, radar geometry, genuine anomaly, temporal offset).
+- **Real map navigation** — scroll to zoom anchored on the pointer, drag to
+  pan, `+` / `−` / `0` for step-zoom and fit, and a scale bar that re-labels
+  itself as you zoom (500 m → 2 km). Imagery, masks, AOI and conflict
+  polygons zoom as one registered sheet, so overlays never drift off the
+  terrain; annotation and coordinate readouts stay truthful under transform.
+- **Runs on the kit you have** — the full three-panel console on a desktop;
+  below 1024 px the imagery rail and query panel become slide-over drawers,
+  so the same build stays usable on a phone or tablet.
+- **Offline-safe typography** — Inter and JetBrains Mono are self-hosted
+  woff2 subsets (165 KB), not a CDN fetch: the instrument panel renders
+  identically on conference Wi-Fi or an air-gapped SAC network.
 - **Answers with evidence** — every answer carries a consistency ring with a
   hard abstain gate (AVNI declines instead of guessing), an amber
   physics-check callout (NDWI vs σ0 backscatter with verdict), a collapsible
@@ -49,7 +60,11 @@ npm run build      # production bundle in dist/
 | `1` `2` `3` `4` | OPTICAL / SAR / BLEND / CHANGE display source |
 | `Enter` | send query · close AOI draft |
 | `Esc` | cancel AOI draft |
+| `+` / `−` | zoom the scene in / out |
+| `0` | fit the scene (reset zoom + pan) |
 
 ## Stack
 
-React 18 + Vite + Tailwind. Inter for UI, JetBrains Mono for data.
+React 18 + Vite + Tailwind. Inter for UI, JetBrains Mono for data, both
+self-hosted. No backend: scene, tiles and model responses are fixture data
+wired through a single app store, so the console runs from a static build.

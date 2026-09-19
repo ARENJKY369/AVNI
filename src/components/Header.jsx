@@ -14,7 +14,7 @@ function useClock() {
 }
 
 export default function Header() {
-  const { layers, aoi, toast } = useApp();
+  const { layers, aoi, toast, drawer, setDrawer } = useApp();
   const clock = useClock();
 
   const exportLayers = () => {
@@ -24,7 +24,16 @@ export default function Header() {
   };
 
   return (
-    <header className="flex h-14 shrink-0 items-center gap-6 border-b hair bg-panel px-4">
+    <header className="flex h-14 shrink-0 items-center gap-3 border-b hair bg-panel px-3 md:gap-6 md:px-4">
+      {/* small screens: the imagery rail slides over the viewer */}
+      <button
+        className={`icon-btn shrink-0 lg:hidden ${drawer === 'imagery' ? 'icon-btn-on' : ''}`}
+        title="imagery panel"
+        onClick={() => setDrawer(drawer === 'imagery' ? null : 'imagery')}
+      >
+        <Icon name="layers" size={16} />
+      </button>
+
       {/* identity */}
       <div className="flex items-center gap-2.5">
         <AvniMark size={30} />
@@ -37,15 +46,15 @@ export default function Header() {
         </div>
       </div>
 
-      <div className="h-6 w-px bg-white/10" />
+      <div className="hidden h-6 w-px bg-white/10 md:block" />
 
       {/* current AOI */}
-      <div className="flex min-w-0 items-center gap-2">
+      <div className="hidden min-w-0 items-center gap-2 sm:flex">
         <span className="lbl">AOI</span>
         <span className="truncate text-[12.5px] font-medium text-t1">{AOI_NAME}</span>
       </div>
 
-      <div className="ml-auto flex items-center gap-5">
+      <div className="ml-auto flex items-center gap-3 md:gap-5">
         <div className="hidden items-center gap-2 md:flex">
           <span className="lbl">Session</span>
           <span className="pill pill-active !h-[20px] !px-2 font-semibold">ACTIVE</span>
@@ -59,10 +68,19 @@ export default function Header() {
 
         <button
           onClick={exportLayers}
+          title="download map layer · GeoJSON"
           className="flex items-center gap-1.5 text-[11.5px] text-accent transition-opacity hover:opacity-80"
         >
           <Icon name="download" size={14} />
-          Download map layer
+          <span className="hidden sm:inline">Download map layer</span>
+        </button>
+
+        <button
+          className={`icon-btn shrink-0 lg:hidden ${drawer === 'query' ? 'icon-btn-on' : ''}`}
+          title="query panel"
+          onClick={() => setDrawer(drawer === 'query' ? null : 'query')}
+        >
+          <Icon name="comment" size={16} />
         </button>
       </div>
     </header>

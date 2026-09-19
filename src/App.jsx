@@ -21,7 +21,7 @@ function Toasts() {
 }
 
 function Shell() {
-  const { tools, setMode } = useApp();
+  const { tools, setMode, drawer, setDrawer } = useApp();
 
   // console-grade keyboard map: / talks to the scene, 1–4 flip display
   // sources. Skipped while typing in a field.
@@ -49,6 +49,12 @@ function Shell() {
         <Viewer />
         {!tools.fullscreen && <QueryPanel />}
       </div>
+      {drawer && !tools.fullscreen && (
+        <div
+          className="fixed inset-x-0 bottom-0 top-14 z-30 bg-ink/70 backdrop-blur-[2px] lg:hidden"
+          onClick={() => setDrawer(null)}
+        />
+      )}
       <Toasts />
     </div>
   );

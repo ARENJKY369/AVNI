@@ -14,6 +14,16 @@ import {
 } from '../data/mock.js';
 import { elevAt, fmtLat, fmtLon, toGeo } from '../lib/geo.js';
 
+// ~10 m/px product over the corridor window — used only to label the scale bar
+const SCENE_WIDTH_KM = 12;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 8;
+
+const clampPan = (p, z, w, h) => ({
+  x: Math.min((w * (z - 1)) / 2, Math.max((-w * (z - 1)) / 2, p.x)),
+  y: Math.min((h * (z - 1)) / 2, Math.max((-h * (z - 1)) / 2, p.y))
+});
+
 function ModePills() {
   const { mode, setMode, blend, setBlend, sceneB } = useApp();
   const [blendOpen, setBlendOpen] = useState(false);
@@ -70,7 +80,7 @@ function ConflictLegend() {
   if (!layers.disagreement.on || mode === 'change') return null;
   const counts = DISAGREEMENT_CLUSTERS.reduce((a, c) => ((a[c.type] = (a[c.type] || 0) + 1), a), {});
   return (
-    <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-1.5">
+    <div className="absolute right-3 top-3 z-20 hidden flex-col items-end gap-1.5 md:flex">
       <div className="pill !border-warn/40 !bg-warn/10 !text-warn">
         <Icon name="split" size={12} />
         optical ↔ SAR conflicts
@@ -223,8 +233,12 @@ export default function Viewer() {
   } = useApp();
 
   const ref = useRef(null);
+  const sizeRef = useRef({ w: 1200, h: 700 });
   const [cursor, setCursor] = useState(() => toGeo(0.52, 0.55));
+  const [view, setView] = useState({ z: 1, x: 0, y: 0 });
+  const [boxW, setBoxW] = useState(1200);
   const draggingSwipe = useRef(false);
+  const panDrag = useRef(null);
 
   const analyzing = queries.some((q) => q.status === 'analyzing');
   const flaggedDone = queries.filter((q) => q.status === 'done' && q.payload.physics_check.flagged).length;
@@ -237,6 +251,87 @@ export default function Viewer() {
   }, [layers]);
 
   const bandsOn = bands.filter((b) => b.on).length;
+
+  const pannable = !drawMode && mode !== 'change';
+
+  // keep the scene box measured so pan bounds and the scale bar stay honest
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      sizeRef.current = { w: el.clientWidth, h: el.clientHeight };
+      setBoxW(el.clientWidth);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  // wheel zoom, anchored on the pointer. Native listener on purpose —
+  // React attaches wheel passively, so preventDefault() is a no-op there.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const r = el.getBoundingClientRect();
+      const cu = (e.clientX - r.left) / r.width;
+      const cv = (e.clientY - r.top) / r.height;
+      const factor = Math.exp(-e.deltaY * 0.0018);
+      setView((v) => {
+        const z2 = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.z * factor));
+        if (Math.abs(z2 - v.z) < 1e-4) return v;
+        const { w, h } = sizeRef.current;
+        // scene fraction currently under the pointer, then re-solve the pan
+        // so that same point stays under the pointer at the new zoom
+        const su = 0.5 + (cu - 0.5 - v.x / w) / v.z;
+        const sv = 0.5 + (cv - 0.5 - v.y / h) / v.z;
+        const p = clampPan(
+          { x: w * (cu - 0.5 - (su - 0.5) * z2), y: h * (cv - 0.5 - (sv - 0.5) * z2) },
+          z2,
+          w,
+          h
+        );
+        return { z: z2, ...p };
+      });
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    return () => el.removeEventListener('wheel', onWheel);
+  }, []);
+
+  const zoomBy = (f) => {
+    setView((v) => {
+      const z2 = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.z * f));
+      const { w, h } = sizeRef.current;
+      if (z2 <= MIN_ZOOM + 1e-4) return { z: 1, x: 0, y: 0 };
+      return { z: z2, ...clampPan({ x: v.x * (z2 / v.z), y: v.y * (z2 / v.z) }, z2, w, h) };
+    });
+  };
+  const fitScene = () => setView({ z: 1, x: 0, y: 0 });
+
+  // +/- zoom, 0 fits the scene — same map muscle memory as QGIS
+  useEffect(() => {
+    const onKey = (e) => {
+      const tag = e.target && e.target.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '+' || e.key === '=') zoomBy(1.4);
+      else if (e.key === '-' || e.key === '_') zoomBy(1 / 1.4);
+      else if (e.key === '0') fitScene();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const inv = 1 / view.z;
+  const scaleBar = useMemo(() => {
+    const kmPerPx = SCENE_WIDTH_KM / Math.max(320, boxW) / view.z;
+    const cands = [0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50];
+    let pick = cands[0];
+    for (const c of cands) if (c / kmPerPx <= 90) pick = c;
+    const px = Math.max(26, Math.min(92, Math.round(pick / kmPerPx)));
+    return { label: pick >= 1 ? `${pick} km` : `${Math.round(pick * 1000)} m`, px };
+  }, [boxW, view.z]);
 
   // Enter closes the AOI draft, Esc cancels — same muscle memory as QGIS
   useEffect(() => {
@@ -260,16 +355,28 @@ export default function Viewer() {
 
   const toUV = (e) => {
     const r = ref.current.getBoundingClientRect();
-    return {
-      u: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
-      v: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height))
-    };
+    const cu = (e.clientX - r.left) / r.width;
+    const cv = (e.clientY - r.top) / r.height;
+    // invert the zoom/pan transform so pointer → scene coords stay truthful
+    const su = 0.5 + (cu - 0.5 - view.x / r.width) / view.z;
+    const sv = 0.5 + (cv - 0.5 - view.y / r.height) / view.z;
+    return { u: Math.min(1, Math.max(0, su)), v: Math.min(1, Math.max(0, sv)) };
   };
 
   const onMove = (e) => {
     const uv = toUV(e);
     setCursor(toGeo(uv.u, uv.v));
     if (draggingSwipe.current) setSwipe(Math.min(96, Math.max(4, uv.u * 100)));
+
+    const d = panDrag.current;
+    if (!d) return;
+    const { w, h } = sizeRef.current;
+    setView((v) =>
+      Object.assign(
+        { z: v.z },
+        clampPan({ x: d.x + (e.clientX - d.px), y: d.y + (e.clientY - d.py) }, v.z, w, h)
+      )
+    );
   };
 
   const onClick = (e) => {
@@ -300,16 +407,46 @@ export default function Viewer() {
     <div className="relative flex min-w-0 flex-1 flex-col bg-ink">
       <div
         ref={ref}
-        className={`scanlines grain relative flex-1 overflow-hidden ${drawMode ? 'cursor-crosshair' : ''}`}
-        onPointerMove={onMove}
-        onPointerDown={() => {
-          if (mode === 'change') draggingSwipe.current = true;
+        className={`scanlines grain relative flex-1 overflow-hidden ${
+          drawMode ? 'cursor-crosshair' : pannable ? 'cursor-grab active:cursor-grabbing' : ''
+        }`}
+        onPointerDown={(e) => {
+          if (mode === 'change') {
+            draggingSwipe.current = true;
+            return;
+          }
+          if (!pannable) return;
+          panDrag.current = { px: e.clientX, py: e.clientY, x: view.x, y: view.y };
+          try {
+            e.currentTarget.setPointerCapture(e.pointerId);
+          } catch {
+            /* older engines */
+          }
         }}
-        onPointerUp={() => (draggingSwipe.current = false)}
-        onPointerLeave={() => (draggingSwipe.current = false)}
+        onPointerMove={onMove}
+        onPointerUp={(e) => {
+          draggingSwipe.current = false;
+          panDrag.current = null;
+          if (e.currentTarget.hasPointerCapture?.(e.pointerId)) {
+            e.currentTarget.releasePointerCapture(e.pointerId);
+          }
+        }}
+        onPointerLeave={() => {
+          draggingSwipe.current = false;
+          panDrag.current = null;
+        }}
         onClick={onClick}
         onDoubleClick={onDblClick}
       >
+        {/* scene sheet — imagery, masks and AOI pan and zoom as one registered unit */}
+        <div
+          className="absolute inset-0"
+          style={{
+            transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})`,
+            transformOrigin: '50% 50%',
+            willChange: 'transform'
+          }}
+        >
         {mode === 'optical' && img(opticalFile.src)}
         {mode === 'sar' && img(SCENES.sar.src)}
         {mode === 'blend' && (
@@ -323,17 +460,63 @@ export default function Viewer() {
             {img(sceneB.src, { clipPath: `inset(0 ${100 - swipe}% 0 0)` })}
             {img(opticalFile.src, { clipPath: `inset(0 0 0 ${swipe}%)` })}
             <div
-              className="absolute inset-y-0 z-20 w-[2px] cursor-ew-resize bg-t1/80"
-              style={{ left: `${swipe}%` }}
+              className="absolute inset-y-0 z-20 cursor-ew-resize bg-t1/80"
+              style={{ left: `${swipe}%`, width: `${Math.max(1, 2 * inv)}px` }}
               onPointerDown={(e) => {
                 e.stopPropagation();
                 draggingSwipe.current = true;
               }}
             >
-              <div className="absolute left-1/2 top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-edge bg-panel text-t1">
-                <Icon name="split" size={12} />
+              <div
+                className="absolute left-1/2 top-1/2 flex -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-edge bg-panel text-t1"
+                style={{ width: `${24 * inv}px`, height: `${24 * inv}px` }}
+              >
+                <Icon name="split" size={Math.max(6, 12 * inv)} />
               </div>
             </div>
+          </>
+        )}
+
+        <Overlays />
+
+        {/* labels counter-scale so annotation stays legible at any zoom */}
+        <span
+          className="absolute z-10 rounded-sm border border-white/25 bg-ink/80 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-widest text-t1"
+          style={{
+            left: `${Math.min(...aoi.map((p) => p.u)) * 100}%`,
+            top: `${Math.min(...aoi.map((p) => p.v)) * 100}%`,
+            transform: `translateY(-100%) scale(${inv})`,
+            transformOrigin: 'left bottom'
+          }}
+        >
+          AOI
+        </span>
+
+        {tools.annotate &&
+          PINS.map((p, i) => (
+            <div
+              key={i}
+              className="absolute z-20"
+              style={{
+                left: `${p.u * 100}%`,
+                top: `${p.v * 100}%`,
+                transform: `scale(${inv})`,
+                transformOrigin: '0 0'
+              }}
+            >
+              <span className="block h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ink bg-accent" />
+              <span className="absolute left-2 top-1 whitespace-nowrap rounded border border-edge bg-panel/95 px-1.5 py-0.5 text-[10px] text-t2">
+                {p.label}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {/* HUD — sits above the sheet, never scales */}
+        <div className="viewer-vignette pointer-events-none absolute inset-0" />
+
+        {mode === 'change' && sceneB && (
+          <>
             <span className="data-mono absolute left-3 top-12 z-10 rounded bg-ink/70 px-1.5 py-0.5 text-t2">
               2024-11-02
             </span>
@@ -342,29 +525,6 @@ export default function Viewer() {
             </span>
           </>
         )}
-
-        <div className="viewer-vignette pointer-events-none absolute inset-0" />
-        <Overlays />
-
-        <span
-          className="absolute z-10 -translate-y-full rounded-sm border border-white/25 bg-ink/80 px-1.5 py-0.5 text-[9.5px] font-semibold tracking-widest text-t1"
-          style={{
-            left: `${Math.min(...aoi.map((p) => p.u)) * 100}%`,
-            top: `${Math.min(...aoi.map((p) => p.v)) * 100}%`
-          }}
-        >
-          AOI
-        </span>
-
-        {tools.annotate &&
-          PINS.map((p, i) => (
-            <div key={i} className="absolute z-20" style={{ left: `${p.u * 100}%`, top: `${p.v * 100}%` }}>
-              <span className="block h-2.5 w-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-ink bg-accent" />
-              <span className="absolute left-2 top-1 whitespace-nowrap rounded border border-edge bg-panel/95 px-1.5 py-0.5 text-[10px] text-t2">
-                {p.label}
-              </span>
-            </div>
-          ))}
 
         {tools.comments && (
           <div className="recess absolute bottom-14 right-3 z-30 w-[260px] px-3.5 py-3">
@@ -384,7 +544,7 @@ export default function Viewer() {
         <ConflictLegend />
 
         {drawMode && (
-          <div className="pill absolute left-1/2 top-3 z-30 -translate-x-1/2 !border-accent/40 !text-accent">
+          <div className="pill absolute left-1/2 top-3 z-30 hidden max-w-[92%] -translate-x-1/2 text-center !border-accent/40 !text-accent sm:inline-flex">
             {draftAoi?.length || 0} vertices · double-click or Enter closes · Esc cancels
           </div>
         )}
@@ -399,14 +559,25 @@ export default function Viewer() {
         <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
           <span className="pill data-mono !text-accent">{fmtLat(cursor.lat)}</span>
           <span className="pill data-mono !text-accent">{fmtLon(cursor.lon)}</span>
-          <span className="pill data-mono !text-t2">elev {elevAt(cursor.lat, cursor.lon)} m</span>
-          <span className="ml-1 hidden items-end gap-1 xl:flex" title="2 km at scene scale">
-            <span className="h-[5px] w-14 border-b border-l border-r border-t2/70" />
-            <span className="data-mono text-t3">2 km</span>
+          <span className="pill data-mono !text-t2 max-sm:hidden">
+            elev {elevAt(cursor.lat, cursor.lon)} m
+          </span>
+          <span
+            className="ml-1 hidden items-end gap-1 xl:flex"
+            title={`scale bar · ${Math.round(view.z * 100)}% zoom`}
+          >
+            <span
+              className="border-b border-l border-r border-t2/70"
+              style={{ height: 5, width: `${scaleBar.px}px` }}
+            />
+            <span className="data-mono text-t3">{scaleBar.label}</span>
           </span>
         </div>
 
-        <div className="absolute bottom-3 right-3 z-20">
+        <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5">
+          <span className="pill hidden data-mono !text-t3 sm:inline-flex">
+            {Math.round(view.z * 100)}%
+          </span>
           <span className={`pill ${analyzing ? '!text-t2' : '!border-accent/40 !text-accent'}`}>
             <span className={analyzing ? 'spin-slow inline-flex' : 'inline-flex'}>
               <Icon name="refresh" size={12} />
@@ -421,7 +592,7 @@ export default function Viewer() {
       {/* bottom toolbar */}
       <div className="flex h-10 shrink-0 items-center gap-3 border-t hair bg-panel px-3">
         <span className="lbl">Display</span>
-        <span className="flex items-center gap-1.5 text-[11.5px] text-t1">
+        <span className="hidden items-center gap-1.5 text-[11.5px] text-t1 2xl:flex">
           {topLayer ? (
             <>
               <Icon
@@ -458,9 +629,9 @@ export default function Viewer() {
           <Icon name="warn" size={15} />
         </button>
 
-        <div className="mx-1 h-5 w-px bg-white/10" />
+        <div className="mx-1 hidden h-5 w-px bg-white/10 md:block" />
 
-        <div className="flex items-center gap-0.5">
+        <div className="hidden items-center gap-0.5 sm:flex">
           <button
             className={`icon-btn ${tools.fullscreen ? 'icon-btn-on' : ''}`}
             title="expand viewer (hides side panels)"
@@ -494,7 +665,34 @@ export default function Viewer() {
           </button>
         </div>
 
-        <span className="data-mono ml-auto text-t3">{bandsOn} bands selected</span>
+        <div className="mx-1 hidden h-5 w-px bg-white/10 md:block" />
+
+        {/* zoom — wheel also works; these are the deliberate, clickable controls */}
+        <div className="flex items-center gap-0.5">
+          <button className="icon-btn" title="zoom out (−)" onClick={() => zoomBy(1 / 1.4)}>
+            <Icon name="minus" size={15} />
+          </button>
+          <button
+            className={`icon-btn w-10 data-mono text-[10.5px] ${view.z > 1.01 ? 'text-accent' : 'text-t3'}`}
+            title="fit scene to view (0)"
+            onClick={fitScene}
+          >
+            {Math.round(view.z * 100)}%
+          </button>
+          <button className="icon-btn" title="zoom in (+)" onClick={() => zoomBy(1.4)}>
+            <Icon name="plus" size={15} />
+          </button>
+        </div>
+
+        <button
+          className={`icon-btn sm:hidden ${tools.fullscreen ? 'icon-btn-on' : ''}`}
+          title="expand viewer (hides side panels)"
+          onClick={() => setTools({ ...tools, fullscreen: !tools.fullscreen })}
+        >
+          <Icon name="expand" size={15} />
+        </button>
+
+        <span className="data-mono ml-auto hidden text-t3 sm:inline">{bandsOn} bands selected</span>
       </div>
     </div>
   );

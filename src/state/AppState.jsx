@@ -30,6 +30,8 @@ export function AppProvider({ children }) {
   const [conflictFilter, setConflictFilter] = useState(null);
   const [swipe, setSwipe] = useState(52);
   const [uploadHover, setUploadHover] = useState(false);
+  // small screens: which side panel is pulled over the viewer
+  const [drawer, setDrawer] = useState(null); // null | 'imagery' | 'query'
   const [opticalFile, setOpticalFile] = useState(SCENES.optical);
   const timers = useRef([]);
 
@@ -107,6 +109,7 @@ export function AppProvider({ children }) {
     conflictFilter, setConflictFilter,
     swipe, setSwipe,
     uploadHover, setUploadHover,
+    drawer, setDrawer,
     opticalFile
   };
 

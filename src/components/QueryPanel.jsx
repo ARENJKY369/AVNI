@@ -114,7 +114,7 @@ function AttachDropzone() {
 }
 
 export default function QueryPanel() {
-  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast } = useApp();
+  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast, drawer } = useApp();
   const [text, setText] = useState('');
   const scrollRef = useRef(null);
 
@@ -131,7 +131,11 @@ export default function QueryPanel() {
   };
 
   return (
-    <aside className="relative flex w-[380px] shrink-0 flex-col border-l hair bg-panel">
+    <aside
+      className={`fixed bottom-0 right-0 top-14 z-40 flex w-[380px] max-w-[92vw] shrink-0 flex-col border-l hair bg-panel transition-transform duration-200 lg:relative lg:inset-auto lg:z-auto lg:translate-x-0 ${
+        drawer === 'query' ? 'translate-x-0' : 'translate-x-full'
+      }`}
+    >
       {/* header */}
       <div className="flex h-10 shrink-0 items-center justify-between border-b hair px-4">
         <span className="lbl">Query</span>
