@@ -114,7 +114,8 @@ function AttachDropzone() {
 }
 
 export default function QueryPanel() {
-  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast, drawer } = useApp();
+  const { queries, sendQuery, attachOpen, setAttachOpen, sceneB, detachSceneB, toast, drawer, sceneGeo } =
+    useApp();
   const [text, setText] = useState('');
   const scrollRef = useRef(null);
 
@@ -145,7 +146,7 @@ export default function QueryPanel() {
               className="icon-btn !h-6 !w-6"
               title="export session report · Markdown"
               onClick={() => {
-                exportSessionMarkdown(queries);
+                exportSessionMarkdown(queries, sceneGeo);
                 toast('session report exported · Markdown');
               }}
             >

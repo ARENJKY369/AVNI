@@ -22,13 +22,20 @@ const slug = (s) =>
     .replace(/^-+|-+$/g, '')
     .slice(0, 40) || 'result';
 
-export function exportAnswerJSON(payload) {
+function georefBlock(geo) {
+  return geo
+    ? { status: geo.status, crs: geo.crs, source: geo.source, note: geo.note }
+    : undefined;
+}
+
+export function exportAnswerJSON(payload, geo) {
   downloadJSON(
     {
       product: 'AVNI',
       model: 'AVNI-VL 0.9',
       exported_at: new Date().toISOString(),
       crs: payload.geodetic.crs,
+      georeference: georefBlock(geo),
       ...payload
     },
     `avni_result_${slug(payload.question)}.json`,
@@ -36,7 +43,8 @@ export function exportAnswerJSON(payload) {
   );
 }
 
-function answerMarkdown(p) {
+function answerMarkdown(p, geo) {
+  const georefOk = !geo || geo.status === 'georeferenced';
   const c = p.confidence;
   const pc = p.physics_check;
   const g = p.geodetic;
@@ -55,8 +63,13 @@ function answerMarkdown(p) {
   lines.push(`- σ0 backscatter: \`${pc.sar_backscatter_db.toFixed(1)} dB\``);
   lines.push(`- Verdict: ${pc.verdict}`, '');
   lines.push(`### Geodetic`);
-  lines.push(`- centroid: \`${fmtLat(g.lat)} ${fmtLon(g.lon)}\``);
-  lines.push(`- footprint: \`${g.area_ha.toFixed(1)} ha\` · \`${g.crs}\``, '');
+  if (georefOk) {
+    lines.push(`- centroid: \`${fmtLat(g.lat)} ${fmtLon(g.lon)}\``);
+    lines.push(`- footprint: \`${g.area_ha.toFixed(1)} ha\` · \`${g.crs}\``);
+    lines.push(`- georeference: ${geo ? geo.source : 'bundled scene footprint'}`, '');
+  } else {
+    lines.push(`- **coordinates withheld** — scene is not georeferenced (${geo.source})`, '');
+  }
   lines.push(`### Execution trace`);
   p.trace.forEach((t, i) => {
     lines.push(`${i + 1}. ${t.step} — _${t.source}_${t.value ? ` — \`${t.value}\`` : ''}`);
@@ -64,19 +77,19 @@ function answerMarkdown(p) {
   return lines.join('\n');
 }
 
-export function exportAnswerMarkdown(payload) {
+export function exportAnswerMarkdown(payload, geo) {
   const body = [
     '# AVNI · result report',
     '',
     `generated ${new Date().toISOString()} · model AVNI-VL 0.9 · SIH 26167 / SAC-ISRO`,
     '',
-    answerMarkdown(payload),
+    answerMarkdown(payload, geo),
     ''
   ].join('\n');
   downloadText(body, `avni_result_${slug(payload.question)}.md`);
 }
 
-export function exportSessionMarkdown(queries) {
+export function exportSessionMarkdown(queries, geo) {
   const done = queries.filter((q) => q.status === 'done');
   const body = [
     '# AVNI · session report',
@@ -86,7 +99,7 @@ export function exportSessionMarkdown(queries) {
     '',
     '---',
     '',
-    done.map((q) => answerMarkdown(q.payload)).join('\n\n---\n\n'),
+    done.map((q) => answerMarkdown(q.payload, geo)).join('\n\n---\n\n'),
     ''
   ].join('\n');
   downloadText(body, `avni_session_${new Date().toISOString().slice(0, 10)}.md`);

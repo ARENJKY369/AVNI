@@ -34,6 +34,14 @@ npm run build      # production bundle in dist/
 - **Runs on the kit you have** — the full three-panel console on a desktop;
   below 1024 px the imagery rail and query panel become slide-over drawers,
   so the same build stays usable on a phone or tablet.
+- **Honest georeferencing** — the AOI is named from its own centroid, not a
+  hardcoded string: coordinates come from the scene's declared footprint
+  (exact) and the place name from an embedded gazetteer, always reported
+  with distance, bearing and its ~1 km accuracy class. Drop in a scene with
+  no CRS and the console says so instead of reusing the last known
+  coordinates — header, viewer readout, sidebar extent, answer geodetic row
+  and the GeoJSON export all withhold, and every export records which of
+  the two states produced it.
 - **Offline-safe typography** — Inter and JetBrains Mono are self-hosted
   woff2 subsets (165 KB), not a CDN fetch: the instrument panel renders
   identically on conference Wi-Fi or an air-gapped SAC network.

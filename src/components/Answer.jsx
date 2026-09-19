@@ -3,16 +3,17 @@ import { Icon } from './Icons.jsx';
 import { Ring, DbHistogram } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { ANALYZE_STAGES } from '../data/mock.js';
-import { buildAnswerGeoJSON, downloadJSON, fmtLat, fmtLon } from '../lib/geo.js';
+import { buildAnswerGeoJSON, downloadJSON, fmtLat, fmtLon, isGeoreferenced } from '../lib/geo.js';
 import { exportAnswerJSON, exportAnswerMarkdown } from '../lib/export.js';
 
 function ExportMenu({ payload }) {
-  const { toast } = useApp();
+  const { toast, sceneGeo } = useApp();
+  const georef = isGeoreferenced(sceneGeo);
   const [open, setOpen] = useState(false);
   const item =
     'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
   const fire = (fn, msg) => () => {
-    fn(payload);
+    fn(payload, sceneGeo);
     toast(msg);
     setOpen(false);
   };
@@ -34,14 +35,16 @@ function ExportMenu({ payload }) {
             analyst report · readable
           </button>
           <button
-            className={item}
+            className={`${item} ${georef ? '' : 'cursor-not-allowed opacity-40'}`}
+            disabled={!georef}
+            title={georef ? 'answer footprint as GeoJSON' : 'withheld — scene is not georeferenced'}
             onClick={fire(
               (p) => downloadJSON(buildAnswerGeoJSON(p), 'avni_answer.geojson'),
               'result exported · GeoJSON footprint'
             )}
           >
             <span className="data-mono w-12 text-t3">.geojson</span>
-            footprint · centroid + area
+            {georef ? 'footprint · centroid + area' : 'withheld · no georeference'}
           </button>
         </div>
       )}
@@ -196,7 +199,20 @@ function Trace({ steps }) {
 }
 
 function GeodeticRow({ geo, payload }) {
-  const { toast } = useApp();
+  const { toast, sceneGeo } = useApp();
+
+  // No georeference on the scene means no honest coordinates to show — the
+  // fixture still carries them, so AVNI withholds them rather than lying.
+  if (!isGeoreferenced(sceneGeo)) {
+    return (
+      <div className="mt-2.5 flex flex-wrap items-center gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2">
+        <Icon name="warn" size={12} className="shrink-0 text-warn" />
+        <span className="text-[11px] text-t2">coordinates withheld — scene is not georeferenced</span>
+        <span className="data-mono ml-auto text-[10px] text-t3">{sceneGeo.source}</span>
+      </div>
+    );
+  }
+
   const exportGeo = () => {
     downloadJSON(buildAnswerGeoJSON(payload), 'avni_answer.geojson');
     toast('GeoJSON written · answer footprint + centroid');

@@ -1,8 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AvniMark, Icon } from './Icons.jsx';
 import { Dot } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
-import { AOI_NAME, buildLayerGeoJSON, downloadJSON, stamp } from '../lib/geo.js';
+import {
+  aoiCentroid,
+  buildLayerGeoJSON,
+  downloadJSON,
+  fmtLat,
+  fmtLon,
+  isGeoreferenced,
+  placeSummary,
+  stamp
+} from '../lib/geo.js';
 
 function useClock() {
   const [t, setT] = useState(stamp);
@@ -14,11 +23,17 @@ function useClock() {
 }
 
 export default function Header() {
-  const { layers, aoi, toast, drawer, setDrawer } = useApp();
+  const { layers, aoi, toast, drawer, setDrawer, sceneGeo } = useApp();
   const clock = useClock();
 
+  const georef = isGeoreferenced(sceneGeo);
+  const place = useMemo(
+    () => (georef ? placeSummary(aoiCentroid(aoi).lat, aoiCentroid(aoi).lon) : null),
+    [georef, aoi]
+  );
+
   const exportLayers = () => {
-    const gj = buildLayerGeoJSON(layers, aoi);
+    const gj = buildLayerGeoJSON(layers, aoi, sceneGeo);
     downloadJSON(gj, `avni_layers_${clock.replace(/[:Z]/g, '')}.geojson`);
     toast('map layer exported · GeoJSON');
   };
@@ -48,10 +63,31 @@ export default function Header() {
 
       <div className="hidden h-6 w-px bg-white/10 md:block" />
 
-      {/* current AOI */}
+      {/* current AOI — name resolved from the AOI centroid, never hardcoded */}
       <div className="hidden min-w-0 items-center gap-2 sm:flex">
         <span className="lbl">AOI</span>
-        <span className="truncate text-[12.5px] font-medium text-t1">{AOI_NAME}</span>
+        {georef ? (
+          <span
+            className="flex min-w-0 items-center gap-1.5"
+            title={`AOI centroid ${fmtLat(aoiCentroid(aoi).lat)} ${fmtLon(aoiCentroid(aoi).lon)} · scene footprint declared in ${sceneGeo.crs} (exact) · place name from embedded gazetteer (~1 km)`}
+          >
+            <span className="truncate text-[12.5px] font-medium text-t1">{place.name}</span>
+            <span className="hidden shrink-0 text-[11px] text-t3 lg:inline">{place.distance}</span>
+            <span className="pill hidden shrink-0 !h-[19px] !px-1.5 !text-[9.5px] xl:inline-flex">
+              gazetteer ±1 km
+            </span>
+          </span>
+        ) : (
+          <span
+            className="flex min-w-0 items-center gap-1.5"
+            title={`${sceneGeo.source} — AVNI withholds coordinates and place names it cannot verify`}
+          >
+            <span className="pill shrink-0 !h-[19px] !border-warn/50 !bg-warn/10 !px-1.5 !text-[9.5px] font-semibold uppercase tracking-wider !text-warn">
+              unlocated
+            </span>
+            <span className="truncate text-[11.5px] text-t3">no CRS on this upload</span>
+          </span>
+        )}
       </div>
 
       <div className="ml-auto flex items-center gap-3 md:gap-5">

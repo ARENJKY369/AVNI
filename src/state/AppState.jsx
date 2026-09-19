@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
 import { BANDS, LAYERS, matchQuery, SCENES } from '../data/mock.js';
+import { SCENE_GEO, UNLOCATED_GEO } from '../lib/geo.js';
 
 const Ctx = createContext(null);
 export const useApp = () => useContext(Ctx);
@@ -33,6 +34,8 @@ export function AppProvider({ children }) {
   // small screens: which side panel is pulled over the viewer
   const [drawer, setDrawer] = useState(null); // null | 'imagery' | 'query'
   const [opticalFile, setOpticalFile] = useState(SCENES.optical);
+  // what we actually know about where this scene is — never assume
+  const [sceneGeo, setSceneGeo] = useState(SCENE_GEO);
   const timers = useRef([]);
 
   const toast = useCallback((msg) => {
@@ -94,7 +97,11 @@ export function AppProvider({ children }) {
 
   const registerUpload = (file) => {
     setOpticalFile({ ...SCENES.optical, file });
-    toast(`scene registered · ${file}`);
+    // An uploaded file gives us pixels, not coordinates. Until a reader
+    // parses its CRS, AVNI reports it as unlocated rather than reusing
+    // the last scene's footprint.
+    setSceneGeo(UNLOCATED_GEO);
+    toast(`scene registered · ${file} · no CRS read — location unverified`);
   };
 
   const value = {
@@ -108,9 +115,9 @@ export function AppProvider({ children }) {
     tools, setTools,
     conflictFilter, setConflictFilter,
     swipe, setSwipe,
-    uploadHover, setUploadHover,
+    uploadHover, setUploadHover, registerUpload,
     drawer, setDrawer,
-    opticalFile
+    opticalFile, sceneGeo
   };
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

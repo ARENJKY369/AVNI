@@ -12,7 +12,7 @@ import {
   SCENES,
   WATER_PATHS
 } from '../data/mock.js';
-import { elevAt, fmtLat, fmtLon, toGeo } from '../lib/geo.js';
+import { elevAt, fmtLat, fmtLon, isGeoreferenced, toGeo } from '../lib/geo.js';
 
 // ~10 m/px product over the corridor window — used only to label the scale bar
 const SCENE_WIDTH_KM = 12;
@@ -229,8 +229,10 @@ export default function Viewer() {
   const {
     mode, blend, layers, queries, opticalFile, sceneB, bands,
     drawMode, setDrawMode, draftAoi, setDraftAoi, aoi, setAoi,
-    tools, setTools, toast, swipe, setSwipe, setAttachOpen
+    tools, setTools, toast, swipe, setSwipe, setAttachOpen, sceneGeo
   } = useApp();
+
+  const georef = isGeoreferenced(sceneGeo);
 
   const ref = useRef(null);
   const sizeRef = useRef({ w: 1200, h: 700 });
@@ -557,21 +559,30 @@ export default function Viewer() {
         </div>
 
         <div className="absolute bottom-3 left-3 z-20 flex items-center gap-1.5">
-          <span className="pill data-mono !text-accent">{fmtLat(cursor.lat)}</span>
-          <span className="pill data-mono !text-accent">{fmtLon(cursor.lon)}</span>
-          <span className="pill data-mono !text-t2 max-sm:hidden">
-            elev {elevAt(cursor.lat, cursor.lon)} m
-          </span>
-          <span
-            className="ml-1 hidden items-end gap-1 xl:flex"
-            title={`scale bar · ${Math.round(view.z * 100)}% zoom`}
-          >
-            <span
-              className="border-b border-l border-r border-t2/70"
-              style={{ height: 5, width: `${scaleBar.px}px` }}
-            />
-            <span className="data-mono text-t3">{scaleBar.label}</span>
-          </span>
+          {georef ? (
+            <>
+              <span className="pill data-mono !text-accent">{fmtLat(cursor.lat)}</span>
+              <span className="pill data-mono !text-accent">{fmtLon(cursor.lon)}</span>
+              <span className="pill data-mono !text-t2 max-sm:hidden">
+                elev {elevAt(cursor.lat, cursor.lon)} m
+              </span>
+              <span
+                className="ml-1 hidden items-end gap-1 xl:flex"
+                title={`scale bar · ${Math.round(view.z * 100)}% zoom`}
+              >
+                <span
+                  className="border-b border-l border-r border-t2/70"
+                  style={{ height: 5, width: `${scaleBar.px}px` }}
+                />
+                <span className="data-mono text-t3">{scaleBar.label}</span>
+              </span>
+            </>
+          ) : (
+            <span className="pill !border-warn/50 !bg-warn/10 !text-warn" title={sceneGeo.source}>
+              <Icon name="warn" size={12} />
+              unlocated · no coordinates reported
+            </span>
+          )}
         </div>
 
         <div className="absolute bottom-3 right-3 z-20 flex items-center gap-1.5">

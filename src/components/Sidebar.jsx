@@ -3,6 +3,7 @@ import { Icon } from './Icons.jsx';
 import { Dot } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { SCENES } from '../data/mock.js';
+import { fmtLat, fmtLon, isGeoreferenced } from '../lib/geo.js';
 
 function Section({ label, right, children, className = '' }) {
   return (
@@ -65,8 +66,9 @@ function Dropzone() {
 }
 
 export default function Sidebar() {
-  const { bands, toggleBand, layers, toggleLayer, drawMode, setDrawMode, opticalFile, sceneB, toast, drawer } =
+  const { bands, toggleBand, layers, toggleLayer, drawMode, setDrawMode, opticalFile, sceneB, toast, drawer, sceneGeo } =
     useApp();
+  const georef = isGeoreferenced(sceneGeo);
 
   return (
     <aside
@@ -146,7 +148,7 @@ export default function Sidebar() {
       <div className="border-t hair px-4 py-3.5">
         <div className="mb-2 flex items-center justify-between">
           <span className="lbl">AOI</span>
-          <span className="data-mono text-t3">EPSG:4326</span>
+          <span className="data-mono text-t3">{georef ? sceneGeo.crs : "no CRS"}</span>
         </div>
         <button
           onClick={() => {
@@ -161,7 +163,22 @@ export default function Sidebar() {
           {drawMode ? 'Drawing… click scene' : 'Draw AOI'}
         </button>
         <div className="mt-2 space-y-0.5 text-[10.5px] leading-4 text-t3">
-          <div>10 m/px · scene extent</div>
+          {georef ? (
+            <>
+              <div className="data-mono">
+                {fmtLat(sceneGeo.extent.minLat)}–{fmtLat(sceneGeo.extent.maxLat)}
+              </div>
+              <div className="data-mono">
+                {fmtLon(sceneGeo.extent.minLon)}–{fmtLon(sceneGeo.extent.maxLon)}
+              </div>
+              <div>10 m/px · declared footprint</div>
+            </>
+          ) : (
+            <>
+              <div className="text-warn">extent unverified — no CRS on this upload</div>
+              <div>resolution unknown</div>
+            </>
+          )}
           <div>Acquisition date supplied by the analysis service</div>
         </div>
       </div>
