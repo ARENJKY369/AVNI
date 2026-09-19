@@ -66,8 +66,8 @@ function ModePills() {
 }
 
 function ConflictLegend() {
-  const { layers, conflictFilter, setConflictFilter } = useApp();
-  if (!layers.disagreement.on) return null;
+  const { layers, conflictFilter, setConflictFilter, mode } = useApp();
+  if (!layers.disagreement.on || mode === 'change') return null;
   const counts = DISAGREEMENT_CLUSTERS.reduce((a, c) => ((a[c.type] = (a[c.type] || 0) + 1), a), {});
   return (
     <div className="absolute right-3 top-3 z-20 flex flex-col items-end gap-1.5">

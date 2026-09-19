@@ -164,10 +164,9 @@ function GeodeticRow({ geo, payload }) {
         {fmtLat(geo.lat)} {fmtLon(geo.lon)}
       </span>
       <span className="data-mono text-t3">{geo.area_ha.toFixed(1)} ha</span>
-      <span className="data-mono hidden text-t3 sm:inline">{geo.crs}</span>
       <button
         onClick={exportGeo}
-        className="ml-auto flex items-center gap-1 rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10.5px] font-semibold text-accent transition-colors hover:bg-accent/20"
+        className="ml-auto flex items-center gap-1 whitespace-nowrap rounded-md border border-accent/40 bg-accent/10 px-2 py-1 text-[10.5px] font-semibold text-accent transition-colors hover:bg-accent/20"
       >
         <Icon name="download" size={11} />
         Download GeoJSON

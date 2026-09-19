@@ -23,13 +23,13 @@ function FloatingActions() {
   const { layers, toggleLayer, toast } = useApp();
   const [open, setOpen] = useState(null); // 'layers' | 'model' | null
   return (
-    <div className="absolute -right-3.5 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2">
+    <div className="absolute right-2 top-1/2 z-30 flex -translate-y-1/2 flex-col gap-2">
       <div className="relative">
         <button className={`float-btn ${open === 'layers' ? '!text-accent !border-accent/50' : ''}`} title="quick layers" onClick={() => setOpen(open === 'layers' ? null : 'layers')}>
           <Icon name="layers" size={14} />
         </button>
         {open === 'layers' && (
-          <div className="recess absolute right-9 top-0 w-[168px] px-3 py-2.5">
+          <div className="recess absolute right-10 top-0 w-[168px] px-3 py-2.5">
             <div className="lbl mb-2">Quick layers</div>
             {Object.values(layers).map((l) => (
               <button key={l.id} onClick={() => toggleLayer(l.id)} className="flex w-full items-center gap-2 py-1 text-left text-[11px] text-t2 hover:text-t1">
@@ -45,7 +45,7 @@ function FloatingActions() {
           <Icon name="model" size={14} />
         </button>
         {open === 'model' && (
-          <div className="recess absolute right-9 top-0 w-[190px] px-3 py-2.5">
+          <div className="recess absolute right-10 top-0 w-[190px] px-3 py-2.5">
             <div className="lbl mb-2">Model card</div>
             {[
               ['backbone', 'AVNI-VL 0.9'],
