@@ -1,27 +1,19 @@
-// Headless screenshot pass over the running dev server.
-import chromium from '@sparticuz/chromium';
-import puppeteer from 'puppeteer-core';
-import { mkdirSync } from 'fs';
+// Headless screenshot pass. Run the dev server first (npm run dev), then:
+//   npm run shots            # writes shots/*.jpg
+//   AVNI_URL=http://host:5173 npm run shots
+import { launch, watchPage, APP_URL, SHOTS_DIR, DOWNLOAD_DIR, prepareDirs } from './browser.mjs';
+import path from 'node:path';
 
-mkdirSync('shots', { recursive: true });
+prepareDirs();
 
-const browser = await puppeteer.launch({
-  args: [...chromium.args, '--force-color-profile=srgb', '--hide-scrollbars'],
-  executablePath: await chromium.executablePath(),
-  headless: true,
-  defaultViewport: { width: 1680, height: 950 }
-});
+const browser = await launch({ width: 1680, height: 950 });
+const page = watchPage(await browser.newPage(), 'shot');
+const shot = (name) => page.screenshot({ path: path.join(SHOTS_DIR, name), type: 'jpeg', quality: 84 });
 
-const page = await browser.newPage();
-page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));
-page.on('console', (m) => {
-  if (m.type() === 'error') console.log('CONSOLE ERROR:', m.text().slice(0, 200));
-});
-
-await page.goto('http://localhost:5173', { waitUntil: 'networkidle0', timeout: 60000 });
+await page.goto(APP_URL, { waitUntil: 'networkidle0', timeout: 60000 });
 await page.waitForNetworkIdle({ idleTime: 800 });
 await new Promise((r) => setTimeout(r, 900));
-await page.screenshot({ path: 'shots/01-empty.png' });
+await shot('01-empty.jpg');
 console.log('shot 01 ok');
 
 // ask the flood question
@@ -29,7 +21,7 @@ await page.click('#composer-input');
 await page.type('#composer-input', 'Where is flooding most severe, and can you trust the water reading near the buildings?', { delay: 4 });
 await page.keyboard.press('Enter');
 await new Promise((r) => setTimeout(r, 900));
-await page.screenshot({ path: 'shots/02-analyzing.png' });
+await shot('02-analyzing.jpg');
 console.log('shot 02 ok');
 
 await new Promise((r) => setTimeout(r, 3200));
@@ -39,7 +31,7 @@ await page.evaluate(() => {
   t && t.click();
 });
 await new Promise((r) => setTimeout(r, 500));
-await page.screenshot({ path: 'shots/03-answer.png' });
+await shot('03-answer.jpg');
 console.log('shot 03 ok');
 
 // open the export menu on the answer
@@ -48,7 +40,7 @@ await page.evaluate(() => {
   b && b.click();
 });
 await new Promise((r) => setTimeout(r, 400));
-await page.screenshot({ path: 'shots/07-export.png' });
+await shot('07-export.jpg');
 console.log('shot 07 ok');
 
 // exercise every export path and record what the browser downloads
@@ -57,7 +49,7 @@ const got = [];
 client.on('Browser.downloadWillBegin', (e) => got.push(e.suggestedFilename));
 await client.send('Browser.setDownloadBehavior', {
   behavior: 'allow',
-  downloadPath: '/home/user/AVNI/shots/downloads',
+  downloadPath: DOWNLOAD_DIR,
   eventsEnabled: true
 });
 for (const label of ['evidence bundle', 'analyst report', 'footprint']) {
@@ -82,10 +74,10 @@ await page.evaluate(() => {
 });
 await new Promise((r) => setTimeout(r, 700));
 console.log('DOWNLOADS:', got.join(', '));
+console.log(`downloads landed in ${DOWNLOAD_DIR}`);
 
-// scroll the conversation so the physics callout + trace + geo row are visible
 await page.evaluate(() => {
-  const scroller = document.querySelector('#composer-input').closest('aside').querySelector('.flex-1.overflow-y-auto');
+  const scroller = document.querySelector('#composer-input').closest('aside').querySelector('.overflow-y-auto');
   scroller && scroller.scrollTo({ top: scroller.scrollHeight });
 });
 await new Promise((r) => setTimeout(r, 300));
@@ -106,7 +98,7 @@ await page.evaluate(() => {
   b && b.click();
 });
 await new Promise((r) => setTimeout(r, 700));
-await page.screenshot({ path: 'shots/04-change.png' });
+await shot('04-change.jpg');
 console.log('shot 04 ok');
 
 // back to optical, ask the reservoir (declined) question
@@ -118,7 +110,7 @@ await page.click('#composer-input');
 await page.type('#composer-input', 'Is the reservoir reading reliable enough to act on?', { delay: 4 });
 await page.keyboard.press('Enter');
 await new Promise((r) => setTimeout(r, 4200));
-await page.screenshot({ path: 'shots/05-declined.png' });
+await shot('05-declined.jpg');
 console.log('shot 05 ok');
 
 // SAR display source
@@ -127,7 +119,7 @@ await page.evaluate(() => {
   pills[0] && pills[0].click();
 });
 await new Promise((r) => setTimeout(r, 700));
-await page.screenshot({ path: 'shots/06-sar.png' });
+await shot('06-sar.jpg');
 console.log('shot 06 ok');
 
 await browser.close();

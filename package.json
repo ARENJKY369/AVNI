@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.9.5",
   "type": "module",
-  "description": "AVNI \u2014 natural-language interrogation of optical + SAR scenes. Frontend build, mock analysis service.",
+  "description": "AVNI — natural-language interrogation of optical + SAR scenes. Frontend build, mock analysis service.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -13,7 +13,8 @@
     "shots": "node scripts/shot.mjs",
     "shots:responsive": "node scripts/shot-responsive.mjs",
     "verify:location": "node scripts/verify-location.mjs",
-    "verify:zoom": "node scripts/verify-zoom.mjs"
+    "verify:zoom": "node scripts/verify-zoom.mjs",
+    "verify:console": "node scripts/verify-console.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

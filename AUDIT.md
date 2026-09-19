@@ -4,6 +4,10 @@
 build, numeric re-computation of the geodetic maths, an executed export probe, and **real browser
 measurement** of the interaction bugs (headless Chromium, 1366×768 / 1680×950 / 390×844).
 
+**This file describes the repository as found.** The branch that carries it also carries the
+fixes — the fix log in §7 names the proof for each one. Ratings below are for the code as audited,
+not as fixed.
+
 **How each finding was verified** — `[code]` read from source · `[run]` executed in Node ·
 `[browser]` measured in a real Chromium session · `[measured]` arithmetic on the repo's own numbers ·
 `[shot]` visible in the committed screenshots.
@@ -50,7 +54,7 @@ maths and the export paths.
 - The zoom/pan inverse transform is correct: the scene point under the pointer stays put across
   zoom (verified in-browser), and overlays/AOI/masks live in the one transformed sheet. `[browser]`
 - The unlocated-upload flow is real honesty machinery: header, viewer readout, sidebar extent,
-  geodetic row and the GeoJSON path all flip to "withheld". `[code]` `[shot 11-unlocated.png]`
+  geodetic row and the GeoJSON path all flip to "withheld". `[code]` `[shot 11-unlocated.jpg]`
 - No XSS/injection surface: no `dangerouslySetInnerHTML`, no `eval`, no secrets. `[code]`
 - The place name really is resolved from the AOI centroid through the embedded gazetteer, not
   hardcoded. `[run]`
@@ -65,7 +69,7 @@ maths and the export paths.
 | --- | --- | --- |
 | **B1** | **The JSON evidence bundle leaks the coordinates the console says it withholds.** `exportAnswerJSON` writes `crs: payload.geodetic.crs` and then spreads `...payload`, re-adding the whole `geodetic` object — so an "unlocated" scene still exports real lat/lon to disk. The Markdown and GeoJSON paths *do* withhold, so the three exporters disagree with each other. | `[code] lib/export.js:31-44` `[run]` probe |
 | **B2** | **The layer export writes hardcoded Bengaluru polygons even when the scene is unlocated.** `buildLayerGeoJSON` skips the *place name* but still emits `boxAround(12.9716, 77.5946, 4.7)` and `boxAround(12.9802, 77.611, 11.2)` plus the AOI ring — a file whose header says `status: unlocated` and whose body contains a footprint to 10 decimal places. The water/built-up polygons are also **not derived from the on-screen overlays**: they only move if you edit the source. | `[code] geo.js:192-235` `[run]` probe |
-| **B3** | **The abstain gate is not enforced in the answer bank.** The flood fixture ships `consistency_score: 0.42, abstained: false`, while the answer card prints **"gate < 0.45"** and the reservoir fixture at 0.31 *is* declined. The demo's most-used answer is a fixture the stated rule would have withheld. The "n of 8 orientations" strings disagree with the scores too (0.42 ⇒ "6 of 8"). | `[code] data/mock.js:129-159` `[shot 03-answer.png]` |
+| **B3** | **The abstain gate is not enforced in the answer bank.** The flood fixture ships `consistency_score: 0.42, abstained: false`, while the answer card prints **"gate < 0.45"** and the reservoir fixture at 0.31 *is* declined. The demo's most-used answer is a fixture the stated rule would have withheld. The "n of 8 orientations" strings disagree with the scores too (0.42 ⇒ "6 of 8"). | `[code] data/mock.js:129-159` `[shot 03-answer.jpg]` |
 
 ### 🟠 P1 — the geospatial layer is not truthful
 
@@ -75,7 +79,7 @@ maths and the export paths.
 | **B5** | **The raster and the declared footprint disagree.** Rasters are 1376×768 (optical), 1408×768 (SAR) and 1408×768 (epoch B) → aspects 1.79 / 1.83; the declared extent is 22.03 × 16.22 km → aspect **1.358**. Three consequences: (a) if the raster covers the extent the GSD is ≈ 16.0 m/px E–W and 21.1 m/px N–S, not the "10 m/px" printed in the sidebar; (b) every image is drawn `object-cover`, so the masks/AOI (container-normalised) are **not registered to the pixels** they sit on; (c) optical and SAR have *different* aspects, so `object-cover` crops them differently — the two "co-registered" rasters are misregistered against each other by up to ~0.5 km at the edges. | `[measured]` `[code] Viewer.jsx:403` |
 | **B6** | **Answer "centroids" are fixture constants unrelated to the AOI.** The flood answer prints 12.9716 / 77.5946 — the "Bengaluru" gazetteer point — while the AOI centroid is 12.9739 / 77.6093 (~1.6 km away). The change answer's 12.9802 / 77.6113 is the same constant used for the hardcoded built-up polygon. The area (4.7 ha ≈ a 217 m box) has no relationship to the drawn AOI either. | `[measured]` `[code]` |
 | **B7** | **The analysis card asserts a CRS the scene may not have.** `ANALYZE_STAGES[0] = 'scene registered · EPSG:4326'` is rendered verbatim before anything about the scene is known — so an unlocated upload still animates "scene registered · EPSG:4326". | `[code] mock.js:116` |
-| **B8** | **The "registered layers" are hand-drawn beziers and literal polygon strings, not detections**, while the UI prints the method as `NDWI>0.45 ∩ σ0<-14 dB` and `VH texture + NDBI`. In the committed screenshot the synthetic river overlay crosses the city on land, nowhere near the actual water in the pixels. For a demo that is fine; for the "honest instrument" framing it is a claim the pixels do not support. | `[shot 01-empty.png]` `[code]` |
+| **B8** | **The "registered layers" are hand-drawn beziers and literal polygon strings, not detections**, while the UI prints the method as `NDWI>0.45 ∩ σ0<-14 dB` and `VH texture + NDBI`. In the committed screenshot the synthetic river overlay crosses the city on land, nowhere near the actual water in the pixels. For a demo that is fine; for the "honest instrument" framing it is a claim the pixels do not support. | `[shot 01-empty.jpg]` `[code]` |
 
 ### 🟡 P2 — behavioural / UX bugs
 
@@ -152,8 +156,22 @@ makes B5(c) (cross-sensor misregistration) worse than the previous pass reported
 
 ## 7. Fix log
 
-Applied on this branch, in order. Every item lists the test or measurement that proves it.
+Every finding above is fixed on this branch except where noted. Fixes are grouped the way the
+commits are; each row names the test or measurement that proves it. Numbers refer to §3.
 
 | Batch | Items | Proof |
 | --- | --- | --- |
-| *(filled in as the fixes land — see the commit history on this branch)* | | |
+| **Integrity** | B1, B2, B3, B6, B7 | `npm test` — 43 tests, including the withhold contract for all three exporters, the gate derivation for the whole answer bank, and the AOI-centroid geometry. `npm run verify:location` reads the 2 271 bytes of the exported JSON bundle and asserts it contains no coordinates. |
+| **Geospatial truth** | B4, B5 | `npm run verify:zoom` measures the on-screen bar: 46 px labelled "1 km" covers **1.003 km** (it used to be 1.83 km). The extent is now derived from the raster aspect, so the sidebar prints a real **16 m/px** and `geo.test.js` asserts square GSD + extent/raster aspect equality. |
+| **Behaviour** | B9, B10, B11, B12, B13, B14 | In-browser: the reader stays where they scrolled (0 px of yank across four stage ticks); the Layover row is reachable at 768 px with the AOI block still pinned; clicking a viewer control mid-draw adds **no** vertex (3 → 3); a .tif upload shows "no renderable preview" instead of the old imagery; an "export" follow-up exports (query count unchanged, toast `footprint exported · GeoJSON`); band toggles now name the pass the next query runs; `npm run shots:responsive` asserts zero horizontal overflow at 390 × 844. |
+| **Robustness** | B15, B16, B17, B18, B19, B22, B23 | ErrorBoundary wraps the shell; timers and object URLs are released on unmount; the key map ignores modifiers and typing targets; `t3` is lifted to `#728293` (**4.7:1** on panel, was 3.40:1); `fs.strict` dropped from `vite.config.js`; intent routing is pattern-based (`/blocks?\b/` no longer matches "blocking"). |
+| **Tooling** | B20, B21, B24, B25, B26, B27 | `scripts/browser.mjs` resolves the bundled Chromium and wires up its NSS libs, so all five scripts run from `npm ci` with `AVNI_URL`/temp-dir overrides and real exit codes; vitest + GitHub Actions CI; `shots/` re-encoded to JPEG, **24.6 MiB → 4.4 MiB**; README rewritten to match the code (`npm test`, `npm run verify:*`, CI). |
+
+**Still true, deliberately:** the overlays and answer text are fixtures (B8) — that is what a
+frontend-only build can honestly ship, and the UI and the exports now say so. Wiring the masks to a
+real NDWI/σ0 pass is a backend change, not a bug fix.
+
+**Deferred, on purpose:** the committed screenshots are ~250 KB JPEGs each (4.4 MiB total — fine for
+GitHub, and they are the visual evidence for every UI finding, so they stay in the repo); §3 keeps the
+original severity ranking even where a fix landed, so the "worst first" order still reads as the
+original risk assessment.

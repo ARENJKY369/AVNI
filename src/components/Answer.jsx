@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { Ring, DbScale } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
@@ -9,6 +9,22 @@ import { exportAnswerGeoJSON, exportAnswerJSON, exportAnswerMarkdown } from '../
 function ExportMenu({ payload, centroid, georef }) {
   const { toast, sceneGeo } = useApp();
   const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  // a menu that only closes when you pick an item feels broken
+  useEffect(() => {
+    if (!open) return undefined;
+    const onDown = (e) => {
+      if (!wrapRef.current?.contains(e.target)) setOpen(false);
+    };
+    const onKey = (e) => e.key === 'Escape' && setOpen(false);
+    window.addEventListener('pointerdown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('pointerdown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
   const item =
     'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
   const fire = (fn, msg) => () => {
@@ -22,7 +38,7 @@ function ExportMenu({ payload, centroid, georef }) {
     setOpen(false);
   };
   return (
-    <div className="relative mb-2 flex justify-end">
+    <div ref={wrapRef} className="relative mb-2 flex justify-end">
       <button
         className={`chip ${open ? '!border-accent/50 !text-t1' : ''}`}
         aria-expanded={open}
