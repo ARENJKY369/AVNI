@@ -25,7 +25,15 @@ import {
 import { ABSTAIN_GATE, ORIENTATIONS } from './model.js';
 
 export function downloadText(text, filename, mime = 'text/markdown') {
-  const blob = new Blob([text], { type: `${mime};charset=utf-8` });
+  downloadBlob(new Blob([text], { type: `${mime};charset=utf-8` }), filename);
+}
+
+/** Binary download (the PDF report) — same path as text, no charset. */
+export function downloadBytes(bytes, filename, mime = 'application/octet-stream') {
+  downloadBlob(new Blob([bytes], { type: mime }), filename);
+}
+
+export function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -36,7 +44,7 @@ export function downloadText(text, filename, mime = 'text/markdown') {
   setTimeout(() => URL.revokeObjectURL(url), 1200);
 }
 
-const slug = (s) =>
+export const slug = (s) =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')

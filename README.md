@@ -62,10 +62,20 @@ npm test           # unit + contract tests (vitest)
 - **Cross-modal + bi-temporal work** — attach a second epoch from the query
   panel to unlock CHANGE ΔT mode: a draggable swipe compare plus a causal
   attribution breakdown whose hectares are computed from its own percentages.
-- **Export everything** — per-answer "Export result" menu (JSON evidence
-  bundle, Markdown analyst report, GeoJSON footprint), a session-level
-  Markdown report from the query panel header, and layer export from the app
-  header. Follow-ups that read like exports *are* exports.
+- **Export everything** — two buttons on every answer: **Download report
+  (PDF)**, a printable field document composed in the browser, and **Download
+  GeoJSON**, the answer footprint. The PDF is built from the same payload the
+  card is showing (question, answer text, consistency and its reason, the
+  physics-check table, geodetic evidence, the numbered execution trace) plus a
+  static map snapshot of the AOI on the registered scene — so a reader with no
+  access to the console can still audit it. It carries no app theme: white
+  paper, dark ink, serif body text, monospace for coordinates, and the GeoJSON
+  filename in the footer for cross-reference. The evidence bundle (`.json`) and
+  Markdown report (`.md`) stay as chips next to them, a session-level Markdown
+  report lives in the query panel header, and layer export in the app header.
+  Follow-ups that read like exports *are* exports. `pdf-lib` is a runtime
+  dependency for this: the document is composed client-side, with no backend
+  call and no print-to-PDF dialog.
 - **Field texture** — annotations, analyst comments, north arrow, scale bar,
   UTC session clock, toasts.
 
@@ -91,7 +101,7 @@ it is derived at render time rather than typed in.
 | `/` | focus the query composer |
 | `1` `2` `3` `4` | OPTICAL / SAR / BLEND / CHANGE display source |
 | `Enter` | send query · close AOI draft |
-| `Esc` | cancel AOI draft · close the export menu |
+| `Esc` | cancel AOI draft · close the console guide |
 | `+` / `−` | zoom the scene in / out |
 | `0` | fit the scene (reset zoom + pan) |
 
@@ -113,13 +123,13 @@ ships with `@sparticuz/chromium`, take the target from `AVNI_URL` (default
 | --- | --- |
 | `npm test` | geodetic maths, footprint/raster invariants, gate derivation, intent routing, and the withhold contract for every exporter |
 | `npm run lint` | eslint (flat config) — correctness rules only: undefined identifiers, dropped updater side effects, stale hook closures, unsafe optional chaining |
-| `npm run verify:console` | 26 end-to-end checks: gate arithmetic, scale-bar truth, draw-mode click isolation, scroll behaviour, export actions (including the exported GeoJSON's ring), toggle toasts, the unlocated upload path, responsive shell |
+| `npm run verify:console` | 28 end-to-end checks: gate arithmetic, scale-bar truth, draw-mode click isolation, scroll behaviour, export actions (including the exported GeoJSON's ring), toggle toasts, the unlocated upload path, the export row, the unlocated PDF report, responsive shell |
 | `npm run verify:zoom` | the point under the cursor survives zoom and pan; scale bar matches the ground; drawers and phone overflow |
-| `npm run verify:location` | place names resolve and recompute; a CRS-less upload withholds everywhere, including the bytes inside the JSON bundle; an undecodable file is refused outright; and on a georeferenced upload the AOI name, the sheet aspect, the scale bar, the GSD in the evidence bundle and the exported GeoJSON all describe *that* scene |
+| `npm run verify:location` | place names resolve and recompute; a CRS-less upload withholds everywhere, including the bytes inside the JSON bundle; an undecodable file is refused outright; on a georeferenced upload the AOI name, the sheet aspect, the scale bar, the GSD in the evidence bundle and the exported GeoJSON all describe *that* scene; and the PDF report is read back page by page (sections, payload numbers, embedded snapshot, the scene filename, the GeoJSON cross-reference) |
 | `npm run verify:segment` | segmentation marking: every click on the scene marks a region, the tolerance slider grows the same seed monotonically, shift adds, and Enter turns the outline into the AOI |
 | `npm run verify:a11y` | axe-core over the shell, mid-answer, the guide dialog and the phone drawer; every visible control has an accessible name |
 | `npm run verify:features` | the four imagery containers end to end (GeoTIFF, COG over HTTP, JPEG2000, Sentinel SAFE), the second-epoch swipe (your file is what is compared) plus the zoom/segmentation promises |
-| `npm run verify:robustness` | nine malformed uploads (empty, truncated, renamed, not-a-SAFE zip, a header claiming 2 MB that is not there) refused by name with the scene intact, then a deterministic 120-action random walk over the real controls with the invariant checker armed |
+| `npm run verify:robustness` | nine malformed uploads (empty, truncated, renamed, not-a-SAFE zip, a header claiming 2 MB that is not there) refused by name with the scene intact, then a deterministic 120-action random walk over the real controls with the invariant checker armed, and a resize walk from 1680 px to 280 px that fails on horizontal overflow or a canvas backing store that has not followed its CSS box |
 | `npm run verify` | lint first, then the whole chain above, in order |
 | `npm run shots` / `npm run shots:responsive` | regenerates `shots/*.jpg` (the committed screenshots) |
 

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { Ring, DbScale } from './ui.jsx';
 import { useApp } from '../state/AppState.jsx';
 import { ABSTAIN_GATE } from '../lib/model.js';
+import { SCENES } from '../data/mock.js';
 import {
   aoiAreaKm2,
   aoiCentroid,
@@ -12,77 +13,140 @@ import {
   utmBlock
 } from '../lib/geo.js';
 import { exportAnswerGeoJSON, exportAnswerJSON, exportAnswerMarkdown } from '../lib/export.js';
-import { useEscape } from '../lib/hooks.js';
+import { exportAnswerPDF } from '../lib/report.js';
+import { reportSnapshot } from '../lib/report-map.js';
 
-function ExportMenu({ payload, centroid, georef, aoiPoints }) {
-  const { toast, sceneGeo, opticalFile } = useApp();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef(null);
-  const triggerRef = useRef(null);
+// The export row: both downloads are buttons on the card, not items behind a
+// menu — a report you cannot find is a report nobody files. The PDF is the
+// primary action, the geometry export sits next to it, and the two older
+// text exports stay visible as small chips.
+function ExportRow({ payload, query, centroid, georef, aoiPoints }) {
+  const {
+    toast, sceneGeo, opticalFile, sceneB, sceneSources, layers, aoi, segment, mode, blend, swipe
+  } = useApp();
+  const [busy, setBusy] = useState(null);
 
-  // a menu that only closes when you pick an item feels broken
-  useEffect(() => {
-    if (!open) return undefined;
-    const onDown = (e) => {
-      if (!wrapRef.current?.contains(e.target)) setOpen(false);
-    };
-    window.addEventListener('pointerdown', onDown);
-    return () => window.removeEventListener('pointerdown', onDown);
-  }, [open]);
-  useEscape(() => {
-    setOpen(false);
-    triggerRef.current?.focus({ preventScroll: true });
-  }, open);
-
-  const item =
-    'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
-  const fire = (fn, msg) => () => {
-    // the raster travels with the export: extent / pixels is only true for the
-    // scene that is on screen
-    fn(payload, sceneGeo, centroid, aoiPoints, opticalFile?.raster || null);
-    toast(msg);
-    setOpen(false);
+  // what the viewer has on screen, in the viewer's own draw order
+  const drawSources = () => {
+    const uploaded =
+      opticalFile.uploaded && opticalFile.canvas ? { bitmap: opticalFile.canvas } : null;
+    const optical = uploaded || sceneSources.optical || null;
+    const sar = sceneSources.sar || null;
+    const epoch = sceneB?.canvas ? { bitmap: sceneB.canvas } : sceneSources.opticalB || null;
+    if (mode === 'sar' && sar) return [sar];
+    if (mode === 'blend' && sar && optical) return [sar, { bitmap: optical.bitmap, alpha: blend }];
+    if (mode === 'change' && epoch && optical) {
+      const edge = swipe / 100;
+      return [
+        { bitmap: optical.bitmap, clipU: [edge, 1] },
+        { bitmap: epoch.bitmap, clipU: [0, edge] }
+      ];
+    }
+    return optical ? [optical] : [];
   };
-  const fireGeoJSON = () => {
+
+  const reportScenes = () => {
+    const rows = [
+      {
+        role: 'primary scene',
+        file: opticalFile.file,
+        sensor: opticalFile.sensor,
+        label: opticalFile.uploaded ? opticalFile.formatLabel || opticalFile.label : opticalFile.label,
+        acquired: opticalFile.acquired || null
+      },
+      { role: 'SAR scene', ...SCENES.sar }
+    ];
+    if (sceneB) {
+      rows.push({
+        role: 'second epoch',
+        file: sceneB.file,
+        sensor: sceneB.sensor,
+        label: sceneB.label,
+        acquired: sceneB.acquired || null
+      });
+    }
+    return rows;
+  };
+
+  const downloadPdf = async () => {
+    setBusy('pdf');
+    try {
+      // the snapshot is best-effort: a report without its map still beats no
+      // report, and the document says which one you are holding
+      let snapshot = null;
+      try {
+        snapshot = await reportSnapshot({
+          sources: drawSources(),
+          mask: segment?.mask || null,
+          layers,
+          aoi,
+          segment,
+          geo: sceneGeo,
+          mode
+        });
+      } catch {
+        snapshot = null;
+      }
+      const { filename } = await exportAnswerPDF({
+        payload,
+        query,
+        geo: sceneGeo,
+        centroid,
+        aoiPoints,
+        scenes: reportScenes(),
+        raster: opticalFile?.raster || null,
+        snapshot
+      });
+      toast(`result exported · ${filename}`);
+    } catch (e) {
+      toast(`report failed · ${e?.message || 'could not compose the PDF'}`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const downloadGeoJSON = () => {
     const written = exportAnswerGeoJSON(payload, sceneGeo, centroid, aoiPoints);
     toast(written ? 'result exported · GeoJSON footprint' : 'withheld — the scene is not georeferenced');
-    setOpen(false);
   };
+
+  const downloadBundle = () => {
+    exportAnswerJSON(payload, sceneGeo, centroid, aoiPoints, opticalFile?.raster || null);
+    toast('result exported · JSON evidence bundle');
+  };
+
+  const downloadMarkdown = () => {
+    exportAnswerMarkdown(payload, sceneGeo, centroid, aoiPoints);
+    toast('result exported · Markdown report');
+  };
+
+  const primary =
+    'no-print flex items-center gap-1.5 rounded-md border border-accent/50 bg-accent/10 px-2.5 py-1 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 disabled:cursor-wait disabled:opacity-60';
+  const secondary = 'chip no-print !text-[10.5px]';
+
   return (
-    <div ref={wrapRef} className="no-print relative mb-2 flex justify-end">
+    <div className="no-print mb-2 flex flex-wrap items-center justify-end gap-1.5">
+      <button className={primary} onClick={downloadPdf} disabled={busy === 'pdf'} title="compose a printable PDF field report from this result">
+        <Icon name="download" size={11} />
+        {busy === 'pdf' ? 'composing report…' : 'Download report (PDF)'}
+      </button>
       <button
-        ref={triggerRef}
-        className={`chip ${open ? '!border-accent/50 !text-t1' : ''}`}
-        aria-expanded={open}
-        aria-haspopup="menu"
-        onClick={() => setOpen((o) => !o)}
+        className={`${primary} ${georef ? '' : 'cursor-not-allowed opacity-40'}`}
+        onClick={downloadGeoJSON}
+        disabled={!georef}
+        title={georef ? 'answer footprint as GeoJSON' : 'withheld — scene is not georeferenced'}
       >
         <Icon name="download" size={11} />
-        Export result
-        <Icon name="chevron" size={10} className={`transition-transform ${open ? 'rotate-180' : ''}`} />
+        Download GeoJSON
       </button>
-      {open && (
-        <div className="recess absolute right-0 top-7 z-20 w-56 px-1.5 py-1.5" role="menu" aria-label="export the result">
-          <button className={item} role="menuitem" onClick={fire(exportAnswerJSON, 'result exported · JSON evidence bundle')}>
-            <span className="data-mono w-12 text-t3">.json</span>
-            evidence bundle · full payload
-          </button>
-          <button className={item} role="menuitem" onClick={fire(exportAnswerMarkdown, 'result exported · Markdown report')}>
-            <span className="data-mono w-12 text-t3">.md</span>
-            analyst report · readable
-          </button>
-          <button
-            className={`${item} ${georef ? '' : 'cursor-not-allowed opacity-40'}`}
-            role="menuitem"
-            disabled={!georef}
-            title={georef ? 'answer footprint as GeoJSON' : 'withheld — scene is not georeferenced'}
-            onClick={fireGeoJSON}
-          >
-            <span className="data-mono w-12 text-t3">.geojson</span>
-            {georef ? 'footprint · AOI centroid + area' : 'withheld · no georeference'}
-          </button>
-        </div>
-      )}
+      <button className={secondary} onClick={downloadBundle} title="full payload as JSON">
+        <span className="data-mono text-t3">.json</span>
+        evidence bundle
+      </button>
+      <button className={secondary} onClick={downloadMarkdown} title="the same result as Markdown">
+        <span className="data-mono text-t3">.md</span>
+        analyst report
+      </button>
     </div>
   );
 }
@@ -352,7 +416,7 @@ export default function Answer({ q, onFollowup }) {
 
   return (
     <article className="answer-in" aria-label={`answer to: ${p.question}`}>
-      <ExportMenu payload={p} centroid={centroid} georef={georef} aoiPoints={aoi} />
+      <ExportRow payload={p} query={q} centroid={centroid} georef={georef} aoiPoints={aoi} />
       {!p.confidence.abstained && (
         <p className="text-[12.5px] leading-[19px] text-t1">{p.answer_text}</p>
       )}

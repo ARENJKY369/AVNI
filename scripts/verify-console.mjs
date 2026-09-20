@@ -3,6 +3,7 @@
 // upload path and the responsive shell.
 //   npm run verify:console
 import { launch, watchPage, APP_URL, prepareDirs } from './browser.mjs';
+import { inspectPdf } from './pdf-inspect.mjs';
 import { writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -283,15 +284,43 @@ check(
   `pill=${unlocated.pill} warn=${unlocated.sidebarWarn} painted=${unlocated.painted}`
 );
 
-await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result')).click());
-await new Promise((r) => setTimeout(r, 300));
-const menu = await page.evaluate(() => [...document.querySelectorAll('button')].filter((b) => b.textContent.includes('withheld')).map((b) => ({ text: b.textContent.replace(/\s+/g, ' ').trim(), disabled: b.disabled })));
-check('GeoJSON export disabled while unlocated', menu.some((m) => m.disabled), JSON.stringify(menu));
-await page.evaluate(() => document.body.click());
+const exportRow = await page.evaluate(() =>
+  [...document.querySelectorAll('button')]
+    .filter((b) => /Download report \(PDF\)|Download GeoJSON|evidence bundle|analyst report/.test(b.textContent))
+    .map((b) => ({ text: b.textContent.replace(/\s+/g, ' ').trim(), disabled: b.disabled }))
+);
+check(
+  'the export row offers both downloads without a menu',
+  exportRow.some((b) => /Download report \(PDF\)/.test(b.text) && !b.disabled) &&
+    exportRow.some((b) => /Download GeoJSON/.test(b.text) && b.disabled),
+  JSON.stringify(exportRow)
+);
 await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('evidence bundle')).click());
 await new Promise((r) => setTimeout(r, 500));
 const jsonToast = await page.evaluate(() => document.body.innerText.match(/result exported[^\n]*/)?.[0] || '');
 check('evidence bundle still exports (withheld inside)', /JSON evidence bundle/.test(jsonToast), jsonToast);
+
+// the PDF report has to compose even for an unlocated scene — and print the
+// same withheld wording the card shows, with no coordinates under it
+await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => /Download report \(PDF\)/i.test(x.textContent)).click());
+await new Promise((r) => setTimeout(r, 9000));
+const pdf = await page.evaluate(async () => {
+  const blob = window.__avniBlobs[window.__avniBlobs.length - 1];
+  if (!blob || blob.type !== 'application/pdf') return null;
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let binary = '';
+  for (let i = 0; i < buf.length; i += 0x8000) binary += String.fromCharCode.apply(null, buf.subarray(i, i + 0x8000));
+  return { size: buf.length, base64: btoa(binary) };
+});
+check('an unlocated scene still yields a PDF report', !!pdf && pdf.size > 10000, pdf ? `${(pdf.size / 1024).toFixed(0)} kB` : 'no pdf captured');
+if (pdf) {
+  const report = await inspectPdf(Buffer.from(pdf.base64, 'base64'));
+  check(
+    'the unlocated report withholds coordinates in prose, not in numbers',
+    report.text.includes('coordinates withheld') && !/\d{1,2}\.\d{4}°[NS]/.test(report.text),
+    report.text.includes('coordinates withheld') ? 'coordinates withheld printed' : 'withheld wording missing'
+  );
+}
 await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Download map layer')).click());
 await new Promise((r) => setTimeout(r, 500));
 const layerToast = await page.evaluate(() => document.body.innerText.match(/layer export[^\n]*/)?.[0] || '');

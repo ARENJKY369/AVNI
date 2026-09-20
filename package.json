@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "AVNI — natural-language interrogation of optical + SAR scenes. Frontend build with a mock analysis service, honest geodetic provenance, and a reproducible evidence harness.",
+  "description": "AVNI \u2014 natural-language interrogation of optical + SAR scenes. Frontend build with a mock analysis service, honest geodetic provenance, and a reproducible evidence harness.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -25,11 +25,12 @@
   },
   "dependencies": {
     "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "react-dom": "^18.3.1",
+    "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@cornerstonejs/codec-openjpeg": "^1.3.6",
-    "@eslint/js": "^10.0.1",
+    "@eslint/js": "^9.39.5",
     "@sparticuz/chromium": "^153.0.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",

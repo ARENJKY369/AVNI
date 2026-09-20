@@ -34,10 +34,10 @@ await new Promise((r) => setTimeout(r, 500));
 await shot('03-answer.jpg');
 console.log('shot 03 ok');
 
-// open the export menu on the answer
+// the export row: both downloads are visible on the card, so the shot has to
+// be taken with the top of the answer in the panel
 await page.evaluate(() => {
-  const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result'));
-  b && b.click();
+  document.querySelector('article[aria-label^="answer to:"]')?.scrollIntoView({ block: 'start' });
 });
 await new Promise((r) => setTimeout(r, 400));
 await shot('07-export.jpg');
@@ -52,20 +52,12 @@ await client.send('Browser.setDownloadBehavior', {
   downloadPath: DOWNLOAD_DIR,
   eventsEnabled: true
 });
-for (const label of ['evidence bundle', 'analyst report', 'footprint']) {
+for (const [label, wait] of [['Download report (PDF)', 8000], ['evidence bundle', 500], ['analyst report', 500], ['Download GeoJSON', 500]]) {
   await page.evaluate((l) => {
     const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes(l));
     b && b.click();
   }, label);
-  await new Promise((r) => setTimeout(r, 500));
-  // reopen menu for next item
-  if (label !== 'footprint') {
-    await page.evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result'));
-      b && b.click();
-    });
-    await new Promise((r) => setTimeout(r, 300));
-  }
+  await new Promise((r) => setTimeout(r, wait));
 }
 // session report from the query panel header
 await page.evaluate(() => {

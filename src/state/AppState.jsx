@@ -147,7 +147,10 @@ export function AppProvider({ children }) {
       // the stages are captured at send time: what the pass used, and whether
       // this scene even has a CRS to claim
       const stages = analyzeStages({ geo: sceneGeo, bands, secondEpoch: !!sceneB });
-      setQueries((qs) => [...qs, { id, status: 'analyzing', stage: 0, stages, payload }]);
+      // `at` is what the PDF report prints as the query timestamp: captured at
+      // send time, so the document says when the question was asked rather than
+      // when someone got round to exporting it
+      setQueries((qs) => [...qs, { id, at: Date.now(), status: 'analyzing', stage: 0, stages, payload }]);
 
       const step = (s) => {
         const t = track(

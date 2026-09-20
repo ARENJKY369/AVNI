@@ -282,6 +282,61 @@ Supporting clean-ups from the same sweep, each of which had hidden something:
   checks that were intended and never written. They are real checks now, plus new coverage for the
   four defects above (attach-by-file, the exported GeoJSON ring, the toggle toasts, a scene swap).
 
-Suite totals after this pass: `npm run lint` clean, `npm test` 123/123, `vite build` green,
+Suite totals after the third pass: `npm run lint` clean, `npm test` 123/123, `vite build` green,
 `npm run verify` = console **26/26** → zoom → segment → location → a11y → features **22/22** →
 robustness (9 malformed uploads, 120-action walk).
+
+Suite totals after the fourth pass: `npm test` **149/149** (a new `report.test.js` reads the PDF's
+own content streams), `npm run lint` clean, `npm run verify` = console **28/28** → zoom → segment →
+location (now including the PDF report) → a11y → features **22/22** → robustness (9 malformed
+uploads, 120-action walk, 12-width resize walk).
+
+## 10. Fourth pass — the reader sweep, the resize walk, and the report
+
+The whole-repo sweep continued past the UI into the decode path, on the theory that a reader is
+where a defect hides longest: nothing in the fixtures makes band counts, sample formats or TIFF
+field types vary. Five defects came out, all silent on every file the app ships.
+
+| Defect | Why it was invisible | Root cause | Fix |
+| --- | --- | --- | --- |
+| A COG's **overview offsets were read as SHORTs** — `[344, 0]` instead of the two real SubIFD offsets `[66016, 82672]` | the fixture still decoded (geotiff.js reads its own IFDs), and only the *layout summary* was wrong — so the app called a 2-overview COG a 0-overview one and degraded `kind: 'cog'` to `'geotiff'` | the TIFF field-type table omitted **13 (IFD)**, so a SubIFDs entry was sized as 2 bytes instead of 4 | type 13 and the BigTIFF 64-bit types are mapped, wide offsets are read as LONG, and the test asserts the offsets point at real IFDs inside the file |
+| A **TileWidth stored as type 1 (BYTE)** threw instead of parsing | no fixture uses BYTE-typed geometry tags | the value reader's `u8` was declared *after* the loop that calls it — the BYTE branch ran in the temporal dead zone | declaration hoisted; a hand-built header pins it |
+| A **two-band raster was read at stride 1** — neighbouring pixels mixed into the grey plane, alpha dropped | Sentinel-2, the fixtures and the browser formats are 1-, 3- or 4-band | `packRgba`'s `samples === 2` branch read `values[i]` on interleaved data | reads `values[i * stride]` and scales plane 1 into the alpha byte |
+| A **signed 16-bit JPEG2000 codestream mapped its darkest sample to white** | no signed codestream ships with the app | the bias was applied as `v + 32768` — which overflows the top half (0x8000 → 65536) — and the percentile histogram was built from *unbiased* values while the mapping ran on biased ones | two's complement is a sign-bit flip (`v ^ 0x8000`), and the histogram is now built through the same accessor the mapping uses |
+| A **two-component frame rendered as (grey, alpha, 0)** — a red-green image with a black blue channel | same reason: nothing shipped is 2-component | `components === 1` was special-cased and everything else fell through to the RGB path | 1 and 2 components are one branch: grey, plus alpha when there is a second plane |
+
+That pass also added the dimension the suites never varied: **size**. `verify:robustness` now walks
+twelve viewport widths from 1680 px down to 280 px and fails on horizontal overflow or a canvas
+backing store that has not followed its CSS box (it caught its own first version racing the render,
+which is why it now waits for the canvas to settle rather than sleeping).
+
+### The PDF report
+
+The query panel's export action was a menu behind a button, and its "report" was Markdown. Both
+were replaced: the answer card now carries a visible export row — **Download report (PDF)** and
+**Download GeoJSON** as buttons, the JSON bundle and Markdown report as chips beside them.
+
+The PDF is composed in the browser with `pdf-lib` (lazy-imported, so nothing pays for the PDF
+writer until it is asked for) from the same objects the card renders: no value is recomputed, and
+where the console withholds something the report says so in the same words. Its six sections are
+the header (AOI place line, scene identifiers and acquisition dates, query timestamp, session
+identity), the question and the full answer text as prose, Confidence & Verification (consistency,
+gate, reason, then NDWI / backscatter / verdict / flag as a labelled table), Geodetic Evidence
+(coordinates, hectares, CRS, footprint, GSD, and the embedded map snapshot), a numbered Execution
+Trace with each step, its source file and its value, and a footer naming the GeoJSON export for
+cross-reference.
+
+The snapshot is the part that makes the document self-contained: the viewer's own draw sources and
+overlay paths are replayed through the same projection functions onto an offscreen canvas in the
+report's palette — light ground, dark ink, white casings on the AOI so it stays legible over dark
+imagery — and embedded as a JPEG (a lossless 2800 px PNG turned a two-page report into a 12 MB
+attachment). Two defects were caught in the composing of it: `placeSummary` returns an object, not a
+string (the first page printed `[object Object]` where the AOI name belonged), and filtering text to
+"code point ≤ 0xFF" turned every em dash the answer bank uses into a question mark — the filter now
+keeps all of CP1252 and transliterates only what the standard fonts genuinely cannot carry.
+
+Verified: `verify:location` reads the exported PDF back (sections, the 2-page limit, the embedded
+JPEG, the scene filename of the upload that was on screen, the footer's GeoJSON cross-reference, and
+that a georeferenced report does print coordinates), while `verify:console` checks the same row on an
+unlocated scene: a report is still produced, it prints *coordinates withheld* in prose, and no
+lat/lon value appears anywhere in it.
