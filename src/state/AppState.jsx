@@ -89,6 +89,17 @@ export function AppProvider({ children }) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }, []);
 
+  /**
+   * A refusal always names the file it refused. Some reader errors quote the
+   * file already ("could not read x.jp2"), and some do not ("the browser could
+   * not decode this image") — the second kind used to leave the analyst looking
+   * at a toast that never said which drop had failed.
+   */
+  const refuse = useCallback(
+    (name, why) => toast(`not registered · ${String(why).includes(name) ? why : `${name} · ${why}`}`),
+    [toast]
+  );
+
   const setMode = useCallback(
     (m) => {
       if (m === 'change' && !sceneB) {
@@ -198,13 +209,12 @@ export function AppProvider({ children }) {
       } catch (e) {
         // a second epoch that cannot be read must not silently leave the demo
         // pair in place under the new file's name
-        const why = e?.sceneError ? e.message : `could not read ${file.name}`;
-        toast(`not registered · ${why}`);
+        refuse(file.name, e?.sceneError ? e.message : `could not read ${file.name}`);
       } finally {
         setSceneBusy(null);
       }
     },
-    [toast]
+    [refuse, toast]
   );
 
   const detachSceneB = useCallback(() => {
@@ -268,13 +278,12 @@ export function AppProvider({ children }) {
         });
         adoptScene(scene);
       } catch (e) {
-        const why = e?.sceneError ? e.message : `could not read ${file.name}`;
-        toast(`not registered · ${why}`);
+        refuse(file.name, e?.sceneError ? e.message : `could not read ${file.name}`);
       } finally {
         setSceneBusy(null);
       }
     },
-    [adoptScene, toast]
+    [adoptScene, refuse]
   );
 
   /** A dropped .SAFE folder (or a webkitdirectory selection). */
@@ -286,12 +295,12 @@ export function AppProvider({ children }) {
         const scene = await readSceneDirectory(files, { onProgress: (p) => setSceneBusy(p) });
         adoptScene(scene);
       } catch (e) {
-        toast(`not registered · ${e?.message || 'unreadable SAFE folder'}`);
+        refuse(files[0]?.name || 'SAFE folder', e?.message || 'unreadable SAFE folder');
       } finally {
         setSceneBusy(null);
       }
     },
-    [adoptScene, toast]
+    [adoptScene, refuse]
   );
 
   /** Remote scenes: a COG on a server is read with range requests. */
@@ -304,12 +313,12 @@ export function AppProvider({ children }) {
         const scene = await readSceneUrl(target, { onProgress: (p) => setSceneBusy(p) });
         adoptScene(scene);
       } catch (e) {
-        toast(`not registered · ${e?.message || 'remote scene unreadable'}`);
+        refuse(target, e?.message || 'remote scene unreadable');
       } finally {
         setSceneBusy(null);
       }
     },
-    [adoptScene, toast]
+    [adoptScene, refuse]
   );
 
   // ---------------------------------------------------------------- segmentation

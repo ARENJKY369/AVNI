@@ -231,6 +231,15 @@ appear when you *use* the console the way an analyst would.
 | An attached epoch was **named but not compared**: the swipe kept showing the shipped pair | attach a solid-green PNG as epoch B, switch to `CHANGE ΔT`, sample the canvas: `rgb(70, 78, 78)` — the demo epoch, not green | `attachSceneB` only ever stored a name and a preview URL; the change view reads `sceneB.canvas`, which was never set | the epoch is decoded, its pixels/canvas are stored, and the pane says so when the epoch carries no CRS of its own. Verified: epoch side of the swipe reads `rgb(0, 178, 0)` |
 | The header kept naming the **old place** after the scene changed | register a scene 14 km away (Whitefield): rail says `12.9917°N 77.7325°E`, header still said *MG Road* | `placeSummary` was memoised on `[georef, aoi]` — swapping scenes keeps `georef` true and the AOI vertices unchanged, so the name was never recomputed | `sceneGeo` is a dependency |
 
+A fifth defect came out of feeding the console rubbish on purpose: two of the
+refusal paths (`the browser could not decode this image`, `this archive does not
+look like a Sentinel SAFE product`) never said *which* file had been refused.
+Every refusal now names its file, and `scripts/verify-robustness.mjs` holds the
+line: nine malformed uploads are refused by name with the working scene intact,
+then a deterministic 120-action random walk (clicks, mode keys, wheel zoom,
+drags, double-clicks) runs with the store invariant checker armed. Zero page
+errors, zero invariant violations, zero console errors.
+
 Supporting clean-ups from the same sweep, each of which had hidden something:
 
 - `npm i -D eslint …` + `eslint.config.js` (flat config) — `npm run lint` and `npm run verify` could not
@@ -251,4 +260,5 @@ Supporting clean-ups from the same sweep, each of which had hidden something:
   four defects above (attach-by-file, the exported GeoJSON ring, the toggle toasts, a scene swap).
 
 Suite totals after this pass: `npm run lint` clean, `npm test` 123/123, `vite build` green,
-`npm run verify` = console **26/26** → zoom → segment → location → a11y → features **22/22**.
+`npm run verify` = console **26/26** → zoom → segment → location → a11y → features **22/22** →
+robustness (9 malformed uploads, 120-action walk).

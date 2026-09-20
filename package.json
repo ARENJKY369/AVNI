@@ -19,8 +19,9 @@
     "verify:segment": "node scripts/verify-segment.mjs",
     "verify:console": "node scripts/verify-console.mjs",
     "verify:a11y": "node scripts/a11y.mjs",
-    "verify": "npm run lint && npm run verify:console && npm run verify:zoom && npm run verify:segment && npm run verify:location && npm run verify:a11y && npm run verify:features",
-    "verify:features": "node scripts/verify-features.mjs"
+    "verify": "npm run lint && npm run verify:console && npm run verify:zoom && npm run verify:segment && npm run verify:location && npm run verify:a11y && npm run verify:features && npm run verify:robustness",
+    "verify:features": "node scripts/verify-features.mjs",
+    "verify:robustness": "node scripts/verify-robustness.mjs"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -119,6 +119,7 @@ ships with `@sparticuz/chromium`, take the target from `AVNI_URL` (default
 | `npm run verify:segment` | segmentation marking: every click on the scene marks a region, the tolerance slider grows the same seed monotonically, shift adds, and Enter turns the outline into the AOI |
 | `npm run verify:a11y` | axe-core over the shell, mid-answer, the guide dialog and the phone drawer; every visible control has an accessible name |
 | `npm run verify:features` | the four imagery containers end to end (GeoTIFF, COG over HTTP, JPEG2000, Sentinel SAFE), the second-epoch swipe (your file is what is compared) plus the zoom/segmentation promises |
+| `npm run verify:robustness` | nine malformed uploads (empty, truncated, renamed, not-a-SAFE zip, a header claiming 2 MB that is not there) refused by name with the scene intact, then a deterministic 120-action random walk over the real controls with the invariant checker armed |
 | `npm run verify` | lint first, then the whole chain above, in order |
 | `npm run shots` / `npm run shots:responsive` | regenerates `shots/*.jpg` (the committed screenshots) |
 
