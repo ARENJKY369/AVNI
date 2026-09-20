@@ -27,6 +27,9 @@ export function readTiffLayout(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const u16 = (o) => view.getUint16(o, little);
   const u32 = (o) => view.getUint32(o, little);
+  // declared before the entry loop: the value reader below can reach the BYTE
+  // path, and a `const` declared after the loop was in its temporal dead zone
+  const u8 = (o) => bytes[o];
   if (u16(2) !== 42) return null;
   const ifdOffset = u32(4);
   if (ifdOffset + 2 > bytes.length) return null;
@@ -38,7 +41,12 @@ export function readTiffLayout(bytes) {
     const tag = u16(at);
     const type = u16(at + 2);
     const count = u32(at + 4);
-    const size = { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8 }[type] || 0;
+    // 13 is IFD and 16/17/18 are the BigTIFF 64-bit types. Leaving 13 out made
+    // the SubIFDs entry (tag 330, type 13) read as SHORTs, so a COG's overview
+    // offsets came back as the offset of their own array and a zero.
+    const size =
+      { 1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 13: 4, 16: 8, 17: 8, 18: 8 }[type] || 0;
+    if (size === 0) continue; // unknown field type: skip rather than read garbage
     const inline = size * count <= 4;
     const valueAt = inline ? at + 8 : u32(at + 8);
     const first = () => {
@@ -51,12 +59,16 @@ export function readTiffLayout(bytes) {
     if (tag === 323) out.tileLength = first();
     if (tag === 273) out.strips = true;
     if (tag === 330) {
+      // offsets are LONG (4) or LONG8/IFD8 (8); a SHORT-typed entry would be
+      // malformed, so read the wide form whenever the type declares it
+      const step = size >= 4 ? size : 2;
       for (let k = 0; k < count; k += 1) {
-        out.subIfds.push(size === 4 ? u32(valueAt + k * 4) : u16(valueAt + k * 2));
+        const at2 = valueAt + k * step;
+        if (at2 + 4 > bytes.length) break;
+        out.subIfds.push(size >= 8 ? u32(at2) + u32(at2 + 4) * 4294967296 : u32(at2));
       }
     }
   }
-  const u8 = (o) => bytes[o];
   return out;
 }
 
@@ -137,20 +149,25 @@ export function geoFromTags({ geoKeys = {}, bbox, origin, resolution, width, hei
   return null;
 }
 
-const packRgba = (values, width, height, samples, { bits = 8, isSigned = false } = {}) => {
+export const packRgba = (values, width, height, samples, { bits = 8, isSigned = false } = {}) => {
   const px = width * height;
   const out = new Uint8ClampedArray(px * 4);
 
   if (samples === 1 || samples === 2) {
+    // interleaved samples, so the grey plane is at stride `samples`. Reading it
+    // at stride 1 mixed neighbouring pixels together and dropped the alpha
+    // plane of a grey+alpha raster entirely.
+    const stride = samples;
     const band = new Float64Array(px);
-    for (let i = 0; i < px; i += 1) band[i] = values[i];
+    for (let i = 0; i < px; i += 1) band[i] = values[i * stride];
     const scale = stretchFor(band, bits, isSigned);
+    const alpha = bits > 8 ? (v) => Math.min(255, Math.round(v / 257)) : (v) => Math.min(255, Math.round(v));
     for (let i = 0; i < px; i += 1) {
       const v = scale(band[i]);
       out[i * 4] = v;
       out[i * 4 + 1] = v;
       out[i * 4 + 2] = v;
-      out[i * 4 + 3] = 255;
+      out[i * 4 + 3] = samples === 2 ? alpha(values[i * stride + 1]) : 255;
     }
     return out;
   }

@@ -186,6 +186,16 @@ export function footprintToGeo(footprint, { crs = 'EPSG:4326', source, mapping, 
  * unusable as screen colours without it).
  */
 export function composeTrueColour({ red, green, blue }, { width, height }) {
+  // composing bands that are not the same size reads past the end of the
+  // smaller frame (typed-array reads past the end are `undefined`, which turns
+  // into NaN and lands as black pixels) — refuse instead of drawing garbage
+  for (const [name, frame] of [['red', red], ['green', green], ['blue', blue]]) {
+    if (frame && (frame.width !== width || frame.height !== height)) {
+      throw new Error(
+        `the ${name} band is ${frame.width}x${frame.height} while the others are ${width}x${height} — refusing to compose a preview`
+      );
+    }
+  }
   const out = new Uint8ClampedArray(width * height * 4);
   const stretchBand = (frame) => {
     const px = frame.width * frame.height;
@@ -304,7 +314,7 @@ export async function readSentinelSafe({ zipBytes, files, name = 'scene.SAFE' } 
   if (parsed.footprint.length >= 3) {
     georef = footprintToGeo(parsed.footprint, {
       crs: 'EPSG:4326',
-      source: `SAFE product metadata (${'MTD_MSIL2A.xml'}) Product_Footprint`,
+      source: `SAFE product metadata (${String(mtd.path).split('/').pop()}) Product_Footprint`,
       mapping: 'linear over the product footprint bbox (UTM raster, not resampled)',
       approximate: true
     });

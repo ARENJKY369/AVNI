@@ -223,6 +223,56 @@ check('no promise or render exceptions from the walk', pageErrors.length === 0, 
 check('the store invariants held throughout', invariants.length === 0, [...new Set(invariants)].slice(0, 3).join(' | '));
 check('no console errors from the walk', others.length === 0, [...new Set(others)].slice(0, 3).join(' | '));
 
+// ---------------------------------------------------------------- 3. resizing
+// The viewer draws into a canvas whose backing store has to match its CSS box
+// at every width, and nothing may push the shell into horizontal overflow.
+const SIZES = [
+  [1680, 950], [1440, 900], [1280, 800], [1024, 768], [900, 700],
+  [834, 1112], [768, 1024], [430, 932], [390, 844], [360, 640], [320, 568], [1680, 950]
+];
+const resizeProblems = [];
+for (const [w, h] of SIZES) {
+  await page.setViewport({ width: w, height: h });
+  // wait for the backing store to catch up with the CSS box rather than
+  // racing it: the 120-action walk above leaves a frame or two of work queued
+  let settled = true;
+  try {
+    await page.waitForFunction(
+      () => {
+        const host = document.querySelector('.scanlines');
+        const canvas = host?.querySelector('canvas');
+        if (!canvas) return false;
+        const box = canvas.getBoundingClientRect();
+        return canvas.width === Math.round(box.width) && canvas.height === Math.round(box.height);
+      },
+      { timeout: 5000 }
+    );
+  } catch {
+    settled = false;
+  }
+  const state = await page.evaluate(() => {
+    const doc = document.documentElement;
+    const host = document.querySelector('.scanlines');
+    const canvas = host?.querySelector('canvas');
+    const box = canvas?.getBoundingClientRect() ?? null;
+    return {
+      overflowX: doc.scrollWidth - doc.clientWidth,
+      backing: canvas ? `${canvas.width}x${canvas.height}` : null,
+      expected: box ? `${Math.round(box.width)}x${Math.round(box.height)}` : null,
+      feedback: !!document.querySelector('#imagery-panel, [aria-live]')?.offsetParent,
+      boundary: /console fault/i.test(document.body.innerText)
+    };
+  });
+  if (state.overflowX > 0) resizeProblems.push(`${w}x${h}: ${state.overflowX}px of horizontal overflow`);
+  if (!settled) resizeProblems.push(`${w}x${h}: canvas backing stuck at ${state.backing} for a ${state.expected} box after 5 s`);
+  if (state.boundary) resizeProblems.push(`${w}x${h}: error boundary`);
+}
+check(
+  `the viewer resizes cleanly through ${SIZES.length} widths (280 px to 1680 px)`,
+  resizeProblems.length === 0,
+  resizeProblems.slice(0, 3).join(' | ') || `backing store followed the CSS box at every width (${SIZES.map(([w]) => w).join(', ')} px), no overflow`
+);
+
 await browser.close();
 const failed = results.filter((r) => !r.ok).length;
 console.log(failed ? `${failed} check(s) FAILED` : 'ALL PASS');

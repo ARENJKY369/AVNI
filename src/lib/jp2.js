@@ -179,13 +179,20 @@ export async function decodeJp2Raw(bytes, { decomposeLevel = 0 } = {}) {
   };
 }
 
-const stretch = (values, max) => {
-  // 2nd-98th percentile stretch, so a 16-bit band that only uses 8 % of its
-  // range still produces a readable preview. Deterministic: no randomness, no
-  // dataset-specific constants.
+/**
+ * 2nd-98th percentile stretch, so a 16-bit band that only uses 8 % of its range
+ * still produces a readable preview. Deterministic: no randomness, no
+ * dataset-specific constants.
+ *
+ * It reads its samples through the same accessor the mapping is applied to.
+ * The histogram used to be built from a raw typed-array view while the mapping
+ * ran on signed samples shifted by +32768, so a signed codestream was stretched
+ * against a histogram of different numbers.
+ */
+const stretchFrom = (valueAt, count, max) => {
   const hist = new Uint32Array(256);
-  for (let i = 0; i < values.length; i += 1) hist[Math.min(255, Math.round((values[i] / max) * 255))] += 1;
-  const target = values.length * 0.02;
+  for (let i = 0; i < count; i += 1) hist[Math.min(255, Math.round((valueAt(i) / max) * 255))] += 1;
+  const target = count * 0.02;
   let lo = 0;
   let hi = 255;
   let acc = 0;
@@ -199,7 +206,7 @@ const stretch = (values, max) => {
   acc = 0;
   for (let i = 0; i < 256; i += 1) {
     acc += hist[i];
-    if (acc >= values.length - target) {
+    if (acc >= count - target) {
       hi = i;
       break;
     }
@@ -220,38 +227,44 @@ export function frameToRgba(frame) {
   const max = sixteen ? 65535 : 255;
 
   const signed16 = sixteen && isSigned;
+  // two's complement -> biased unsigned: flip the sign bit, do not add 32768
+  // (adding overflows the top half: 0x8000 came out as 65536 and the darkest
+  // sample mapped to white)
   const sample = (i) => {
     const v = data[i];
-    return signed16 ? v + 32768 : v;
+    return signed16 ? v ^ 0x8000 : v;
   };
 
-  if (components === 1) {
-    const source = sixteen ? new Uint16Array(data.buffer, data.byteOffset, px) : data;
-    const map = sixteen ? stretch(source, max) : (v) => v;
+  if (components <= 2) {
+    // 1 component is grey, 2 is grey + alpha. The second plane used to fall
+    // through to the RGB path, which rendered a grey/alpha pair as (grey, alpha,
+    // 0) — a red-green frame with a black blue channel.
+    const stride = components;
+    const map = sixteen ? stretchFrom((i) => sample(i * stride), px, max) : (v) => v;
     for (let i = 0; i < px; i += 1) {
-      const v = map(sixteen ? sample(i) : sample(i));
+      const v = map(sixteen ? sample(i * stride) : data[i * stride]);
       out[i * 4] = v;
       out[i * 4 + 1] = v;
       out[i * 4 + 2] = v;
-      out[i * 4 + 3] = 255;
+      out[i * 4 + 3] =
+        components === 2 ? (sixteen ? sample(i * stride + 1) >> 8 : data[i * stride + 1]) : 255;
     }
     return out;
   }
 
   const planes = components;
   const source = sixteen ? new Uint16Array(data.buffer, data.byteOffset, px * planes) : data;
+  const channels = planeFill(planes);
   const maps = [];
   if (sixteen) {
-    for (let c = 0; c < Math.min(3, planes); c += 1) {
-      const band = new Uint16Array(px);
-      for (let i = 0; i < px; i += 1) band[i] = source[i * planes + c];
-      maps.push(stretch(band, max));
+    for (let c = 0; c < channels; c += 1) {
+      maps.push(stretchFrom((i) => sample(i * planes + c), px, max));
     }
   }
   for (let i = 0; i < px; i += 1) {
-    for (let c = 0; c < planeFill(planes); c += 1) {
+    for (let c = 0; c < channels; c += 1) {
       const raw = sixteen ? sample(i * planes + c) : source[i * planes + c];
-      out[i * 4 + c] = sixteen && maps[c] ? maps[c](raw) : raw;
+      out[i * 4 + c] = sixteen ? maps[c](raw) : raw;
     }
     out[i * 4 + 3] =
       planes > 3 ? (sixteen ? sample(i * planes + 3) >> 8 : source[i * planes + 3]) : 255;

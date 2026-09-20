@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { classifyName, sniffFormat, ACCEPT_ATTR, SUPPORT_MATRIX } from '../lib/scene-format.js';
-import { readTiffLayout, geoFromTags, readGeoTiff } from '../lib/geotiff-io.js';
+import { readTiffLayout, geoFromTags, readGeoTiff, packRgba } from '../lib/geotiff-io.js';
 import { readJp2Boxes, decodeJp2ToRgba, isJp2, frameToRgba } from '../lib/jp2.js';
 import { readSentinelSafe, parseSafeMtd, safeFamily, composeTrueColour } from '../lib/safe.js';
 import { readSceneFile, readJp2Scene } from '../lib/raster.js';
@@ -66,10 +66,31 @@ describe('GeoTIFF / COG', () => {
     expect(layout.tileWidth).toBe(128);
     expect(layout.tileLength).toBeGreaterThan(0);
     expect(layout.subIfds.length).toBe(2); // the two overviews a COG carries
+    // ...and they have to be real IFD offsets: the SubIFDs entry is type 13
+    // (IFD), which an incomplete type table read as SHORTs — reporting the
+    // offset of the array itself and a zero
+    const cog = bytesOf(COG);
+    const view = new DataView(cog.buffer, cog.byteOffset, cog.byteLength);
+    for (const offset of layout.subIfds) {
+      expect(offset).toBeGreaterThan(0);
+      expect(offset + 12).toBeLessThan(cog.length);
+      expect(view.getUint16(offset, true)).toBeGreaterThan(0); // an IFD with entries
+    }
     expect(layout.strips).toBe(false);
     const strips = readTiffLayout(bytesOf(GEO));
     expect(strips.strips).toBe(true);
-    expect(strips.tileWidth).toBe(0);
+  });
+
+  it('reads a TileWidth stored as a BYTE without tripping the parse', () => {
+    // type 1 (BYTE) inline: the value reader reached its u8 branch, which was
+    // declared after the entry loop and therefore in its temporal dead zone
+    const header = new Uint8Array([
+      0x49, 0x49, 0x2a, 0x00, 0x08, 0x00, 0x00, 0x00, // II, 42, IFD at 8
+      0x01, 0x00, // one entry
+      0x42, 0x01, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x80, 0x00, 0x00, 0x00, // 322 BYTE x1 = 128
+      0x00, 0x00, 0x00, 0x00 // no next IFD
+    ]);
+    expect(readTiffLayout(header).tileWidth).toBe(128);
   });
 
   it('resolves EPSG:32643 from the geo keys with a UTM origin', async () => {
@@ -95,6 +116,17 @@ describe('GeoTIFF / COG', () => {
       expect(scene.georef.crs).toMatch(/^EPSG:/);
       expect(scene.georef.status).toBe('georeferenced');
     }
+  });
+
+  it('reads a two-band raster as grey plus alpha, on the interleaved stride', () => {
+    // 2 px, samples interleaved: [grey0, alpha0, grey1, alpha1]
+    const rgba = packRgba(new Uint8Array([10, 200, 240, 128]), 2, 1, 2, { bits: 8 });
+    expect([...rgba]).toEqual([10, 10, 10, 200, 240, 240, 240, 128]);
+  });
+
+  it('scales a 16-bit alpha plane into the byte alpha channel', () => {
+    const rgba = packRgba(new Uint16Array([0, 65535, 65535, 0]), 2, 1, 2, { bits: 16 });
+    expect([...rgba]).toEqual([0, 0, 0, 255, 255, 255, 255, 0]);
   });
 
   it('routes a GeoTIFF drop and labels the COG as cloud-optimised', async () => {
@@ -129,6 +161,24 @@ describe('JPEG2000', () => {
     expect(scene.georef).toBe(null);
     expect(scene.bands).toEqual(['grey']);
     expect(scene.notes.join(' ')).toMatch(/no CRS inside a JPEG2000 file/);
+  });
+
+  it('stretches a signed 16-bit band against the values it actually maps', () => {
+    // two's-complement samples: the histogram has to be built from the shifted
+    // values, or the darkest sample does not reach the stretch's black point
+    const data = new Uint16Array([0x8000, 0x8001, 0x9000, 0xffff]); // -32768, -32767, -4096, -1
+    const rgba = frameToRgba({ width: 4, height: 1, components: 1, bitsPerSample: 16, isSigned: true, data });
+    expect(rgba[0]).toBe(0); // the darkest sample is the black point, not white
+    expect(rgba[12]).toBe(255); // the brightest is the white point
+    expect(rgba[4]).toBe(0); // one step up is still inside the 2 % floor
+    expect(rgba[8]).toBeGreaterThan(0); // and the mid sample is above the floor
+  });
+
+  it('treats a two-component frame as grey plus alpha, not as RGB', () => {
+    const data = new Uint8Array([10, 200, 20, 200]); // 2 x 1: grey 10/20, alpha 200
+    const rgba = frameToRgba({ width: 2, height: 1, components: 2, bitsPerSample: 8, data });
+    expect([...rgba.slice(0, 4)]).toEqual([10, 10, 10, 200]);
+    expect([...rgba.slice(4, 8)]).toEqual([20, 20, 20, 200]);
   });
 
   it('expands a single-component frame to grey RGBA', () => {
@@ -178,6 +228,15 @@ describe('Sentinel SAFE', () => {
     expect(parsed.sensingStart).toContain('2025-08-14');
     expect(parsed.productType).toBeNull(); // Product_Type lives under General_Info/Product_Type
     expect(parseSafeMtd('<Level-2A_User_Product><General_Info><Product_Type>S2MSI2A</Product_Type></General_Info></Level-2A_User_Product>').productType).toBe('S2MSI2A');
+  });
+
+  it('refuses to compose a preview from bands that are not the same size', () => {
+    // reading past the end of the smaller frame yields undefined -> NaN -> black
+    const frame = (w, h) => ({ width: w, height: h, bitsPerSample: 8, data: new Uint8ClampedArray(w * h) });
+    expect(() =>
+      composeTrueColour({ red: frame(2, 2), green: frame(4, 4), blue: null }, { width: 4, height: 4 })
+    ).toThrow(/band is \d+x\d+ while the others are/i);
+    expect(() => composeTrueColour({ red: frame(2, 2), green: frame(2, 2), blue: null }, { width: 2, height: 2 })).not.toThrow();
   });
 
   it('composes a true colour image from three reflectance bands', () => {
