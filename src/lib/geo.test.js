@@ -272,6 +272,47 @@ describe('GeoJSON exports', () => {
     expect(aoi.geometry.coordinates[0]).toHaveLength(AOI.length + 1);
   });
 
+  it('maps every exported coordinate into the scene it was given, not the bundled one', () => {
+    // an upload 14 km east of the bundled footprint: nothing in the file may
+    // land on the old rectangle, whatever the header says
+    const shifted = {
+      ...SCENE_GEO,
+      extent: { minLat: 12.99, maxLat: 12.9965, minLon: 77.73, maxLon: 77.7345 },
+      crs: 'EPSG:4326',
+      source: 'GeoTIFF tags'
+    };
+    const fc = buildLayerGeoJSON(ALL_LAYERS, AOI, shifted);
+    const lons = [];
+    const lats = [];
+    for (const f of fc.features) {
+      const walk = (c) => (typeof c[0] === 'number' ? (lons.push(c[0]), lats.push(c[1])) : c.forEach(walk));
+      walk(f.geometry.coordinates);
+    }
+    expect(lons.length).toBeGreaterThan(30);
+    // the fixture river is drawn from -3 % to 103 % of the frame, so it hangs a
+    // hair over the footprint edge on purpose; the margin allows that overhang
+    // and nothing else — the old bug was 14 km, not 15 m
+    const marginLon = (shifted.extent.maxLon - shifted.extent.minLon) * 0.05;
+    const marginLat = (shifted.extent.maxLat - shifted.extent.minLat) * 0.05;
+    expect(Math.min(...lons)).toBeGreaterThan(shifted.extent.minLon - marginLon);
+    expect(Math.max(...lons)).toBeLessThan(shifted.extent.maxLon + marginLon);
+    expect(Math.min(...lats)).toBeGreaterThan(shifted.extent.minLat - marginLat);
+    expect(Math.max(...lats)).toBeLessThan(shifted.extent.maxLat + marginLat);
+    const aoi = fc.features.find((f) => f.properties.layer === 'aoi');
+    expect(aoi.properties.centroid[0]).toBeGreaterThanOrEqual(shifted.extent.minLon);
+    // the area is the AOI's, measured on this footprint: the same ring 14 km
+    // east is not the same number of square kilometres
+    expect(aoi.properties.area_km2).toBeCloseTo(aoiAreaKm2(AOI, shifted), 3);
+    expect(aoi.properties.area_km2).not.toBeCloseTo(aoiAreaKm2(AOI, SCENE_GEO), 1);
+  });
+
+  it('measures the answer AOI area on the scene the answer came from', () => {
+    const shifted = { ...SCENE_GEO, extent: { minLat: 12.99, maxLat: 12.9965, minLon: 77.73, maxLon: 77.7345 } };
+    const fc = buildAnswerGeoJSON(ANSWER, aoiCentroid(AOI, shifted), shifted, AOI);
+    const footprint = fc.features.find((f) => f.properties.kind === 'answer_footprint');
+    expect(footprint.properties.aoi_area_km2).toBeCloseTo(aoiAreaKm2(AOI, shifted), 3);
+  });
+
   it('respects the layer switches', () => {
     const fc = buildLayerGeoJSON({ water: { on: false }, builtin: { on: false } }, [], SCENE_GEO);
     expect(fc.features).toHaveLength(0);

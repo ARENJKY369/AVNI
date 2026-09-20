@@ -231,6 +231,16 @@ appear when you *use* the console the way an analyst would.
 | An attached epoch was **named but not compared**: the swipe kept showing the shipped pair | attach a solid-green PNG as epoch B, switch to `CHANGE ΔT`, sample the canvas: `rgb(70, 78, 78)` — the demo epoch, not green | `attachSceneB` only ever stored a name and a preview URL; the change view reads `sceneB.canvas`, which was never set | the epoch is decoded, its pixels/canvas are stored, and the pane says so when the epoch carries no CRS of its own. Verified: epoch side of the swipe reads `rgb(0, 178, 0)` |
 | The header kept naming the **old place** after the scene changed | register a scene 14 km away (Whitefield): rail says `12.9917°N 77.7325°E`, header still said *MG Road* | `placeSummary` was memoised on `[georef, aoi]` — swapping scenes keeps `georef` true and the AOI vertices unchanged, so the name was never recomputed | `sceneGeo` is a dependency |
 
+A sixth was found by exporting a layer from an uploaded scene and reading the
+file: **`buildLayerGeoJSON` mapped every coordinate through the bundled
+footprint whatever scene was on screen** — with a GeoTIFF over Whitefield
+registered (rail: 77.7300°E), the export wrote the AOI at 77.6093°E, called it
+*MG Road* and reported 36.84 km², while its own `georeference` block described
+the uploaded CRS. `buildAnswerGeoJSON` measured `aoi_area_km2` the same way.
+Both now take the footprint they are given, all the way down through
+`uvToGeo`/`pointsToRing`/`aoiRing`, and `verify-location.mjs` reads the
+exported bytes back: `7 features · lon 77.7299–77.7349 · AOI Whitefield`.
+
 A fifth defect came out of feeding the console rubbish on purpose: two of the
 refusal paths (`the browser could not decode this image`, `this archive does not
 look like a Sentinel SAFE product`) never said *which* file had been refused.

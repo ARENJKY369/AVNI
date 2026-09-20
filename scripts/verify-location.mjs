@@ -219,6 +219,30 @@ check(
   `header "${moved.place}" vs the rail's own coordinates -> ${moved.expected}`
 );
 
+// and the layer export has to describe *this* scene: the geometry used to be
+// mapped through the bundled footprint whatever the header said
+await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /download map layer/i.test(b.textContent))?.click());
+await new Promise((r) => setTimeout(r, 800));
+const exported = await page.evaluate(async () => {
+  const text = await window.__avniBlobs[window.__avniBlobs.length - 1].text();
+  const fc = JSON.parse(text);
+  const lons = [];
+  const lats = [];
+  const walk = (c) => (typeof c[0] === 'number' ? (lons.push(c[0]), lats.push(c[1])) : c.forEach(walk));
+  for (const f of fc.features) walk(f.geometry.coordinates);
+  const aoi = fc.features.find((f) => f.properties.layer === 'aoi');
+  return { count: fc.features.length, minLon: Math.min(...lons), maxLon: Math.max(...lons), minLat: Math.min(...lats), maxLat: Math.max(...lats), name: aoi?.properties?.name || null, crs: fc.georeference?.crs || null };
+});
+check(
+  'the exported layer is drawn on the scene that is on screen',
+  exported.crs === 'EPSG:4326' &&
+    /Whitefield/.test(exported.name || '') &&
+    exported.minLon > 77.6 &&
+    exported.minLon < 77.75 &&
+    exported.maxLat < 13.05,
+  `${exported.count} features · lon ${exported.minLon.toFixed(4)}–${exported.maxLon.toFixed(4)} · AOI ${exported.name}`
+);
+
 await browser.close();
 const failed = results.filter((r) => !r[1]).length;
 console.log(failed ? `${failed} check(s) FAILED` : 'ALL PASS');

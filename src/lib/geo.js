@@ -281,8 +281,8 @@ export function fmtLon(lon) {
 // footprint — so a layer file always describes what is on screen instead of
 // a hardcoded lat/lon nobody can point at.
 
-const uvToGeo = (x, y) => {
-  const g = toGeo(x / 100, y / 100);
+const uvToGeo = (x, y, geo = null) => {
+  const g = toGeo(x / 100, y / 100, geo);
   return [g.lon, g.lat];
 };
 
@@ -307,8 +307,8 @@ export function flattenPath(d, steps = 10) {
   return pts;
 }
 
-const pointsToRing = (points, close = true) => {
-  const ring = points.map((p) => uvToGeo(p[0], p[1]));
+const pointsToRing = (points, geo = null, close = true) => {
+  const ring = points.map((p) => uvToGeo(p[0], p[1], geo));
   if (close) ring.push(ring[0]);
   return ring;
 };
@@ -413,7 +413,7 @@ export function buildAnswerGeoJSON(answer, centroid, geo = SCENE_GEO, aoiPoints 
           kind: 'answer_footprint',
           area_ha: areaHa,
           area_source: 'analysis-service area fixture, centred on the drawn AOI',
-          aoi_area_km2: aoiPoints.length > 2 ? Number(aoiAreaKm2(aoiPoints).toFixed(4)) : null,
+          aoi_area_km2: aoiPoints.length > 2 ? Number(aoiAreaKm2(aoiPoints, geo).toFixed(4)) : null,
           aoi_area_source: 'derived from the drawn AOI ring',
           method: 'AVNI water mask ∩ AOI'
         },
@@ -437,7 +437,7 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
         method: 'NDWI>0.45 ∩ σ0<-14dB',
         geometry_note: 'river centreline as drawn (fixture overlay, image space)'
       },
-      geometry: { type: 'LineString', coordinates: flattenPath(WATER_PATHS.optical).map((p) => uvToGeo(p[0], p[1])) }
+      geometry: { type: 'LineString', coordinates: flattenPath(WATER_PATHS.optical).map((p) => uvToGeo(p[0], p[1], geo)) }
     });
   }
 
@@ -451,7 +451,7 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
       },
       geometry: {
         type: 'MultiPolygon',
-        coordinates: BUILTIN_POLYS.map((p) => [pointsToRing(polyStringToPoints(p))])
+        coordinates: BUILTIN_POLYS.map((p) => [pointsToRing(polyStringToPoints(p), geo)])
       }
     });
   }
@@ -462,7 +462,7 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
       properties: { layer: 'layover', method: 'radar geometry envelope', geometry_note: 'fixture overlay' },
       geometry: {
         type: 'MultiPolygon',
-        coordinates: LAYOVER_POLYS.map((p) => [pointsToRing(polyStringToPoints(p))])
+        coordinates: LAYOVER_POLYS.map((p) => [pointsToRing(polyStringToPoints(p), geo)])
       }
     });
   }
@@ -477,13 +477,13 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
           conflict_name: CONFLICT_TYPES[c.type]?.name,
           note: c.note
         },
-        geometry: { type: 'Polygon', coordinates: [pointsToRing(polyStringToPoints(c.pts))] }
+        geometry: { type: 'Polygon', coordinates: [pointsToRing(polyStringToPoints(c.pts), geo)] }
       });
     }
   }
 
   if (aoiPoints && aoiPoints.length > 2) {
-    const c = aoiCentroid(aoiPoints);
+    const c = aoiCentroid(aoiPoints, geo);
     const place = placeSummary(c.lat, c.lon);
     feats.push({
       type: 'Feature',
@@ -495,7 +495,7 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
         place_offset: place.distance,
         place_source: `embedded gazetteer (~${GAZETTEER_ACCURACY_KM} km)`,
         centroid: [Number(c.lon.toFixed(6)), Number(c.lat.toFixed(6))],
-        area_km2: Number(aoiAreaKm2(aoiPoints).toFixed(4)),
+        area_km2: Number(aoiAreaKm2(aoiPoints, geo).toFixed(4)),
         area_source: 'derived from the drawn AOI ring',
         utm_zone: utmZoneLabel(c.lat, c.lon),
         utm_easting_m: utmBlock(c.lat, c.lon).easting_m,
@@ -503,10 +503,15 @@ export function buildLayerGeoJSON(layers, aoiPoints, geo = SCENE_GEO) {
       },
       geometry: {
         type: 'Polygon',
+        // the drawn ring, mapped through the scene the viewer is showing — the
+        // same vertices the AOI block, the answer and the evidence bundle use
         coordinates: [
           [
-            ...aoiPoints.map((p) => uvToGeo(p.u * 100, p.v * 100)),
-            uvToGeo(aoiPoints[0].u * 100, aoiPoints[0].v * 100)
+            ...aoiRing(aoiPoints, geo).map((p) => [p.lon, p.lat]),
+            (() => {
+              const first = aoiRing(aoiPoints, geo)[0];
+              return [first.lon, first.lat];
+            })()
           ]
         ]
       }
