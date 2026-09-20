@@ -313,6 +313,20 @@ describe('GeoJSON exports', () => {
     expect(footprint.properties.aoi_area_km2).toBeCloseTo(aoiAreaKm2(AOI, shifted), 3);
   });
 
+  it('treats a null extent or raster as "not stated", never as a crash', () => {
+    // an unlocated scene carries extent: null; the scale bar is only rendered
+    // for a georeferenced scene, but the maths must not throw before that gate
+    expect(() => extentKm(null)).not.toThrow();
+    expect(extentKm(null)).toEqual(extentKm(SCENE_EXTENT));
+    expect(groundSampleMetres(SCENE_EXTENT, { width: 0, height: 0 })).toEqual(
+      groundSampleMetres(SCENE_EXTENT, SCENE_RASTER)
+    );
+    expect(gsdLabel(null, null)).toBe(gsdLabel(SCENE_EXTENT, SCENE_RASTER));
+    expect(scaleBar({ extent: null, sheetWidthPx: 900, zoom: 1 }).label).toBe(
+      scaleBar({ extent: SCENE_EXTENT, sheetWidthPx: 900, zoom: 1 }).label
+    );
+  });
+
   it('respects the layer switches', () => {
     const fc = buildLayerGeoJSON({ water: { on: false }, builtin: { on: false } }, [], SCENE_GEO);
     expect(fc.features).toHaveLength(0);

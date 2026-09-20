@@ -19,6 +19,7 @@ import {
   fmtLon,
   gsdLabel,
   isGeoreferenced,
+  SCENE_ASPECT,
   scaleBar,
   sheetSize,
   toGeo
@@ -320,7 +321,13 @@ export default function Viewer() {
   // inside the viewer. Imagery is drawn *fill* into it, so a mask at u=0.3
   // sits on the same pixels as the lat/lon computed from u=0.3 — and the
   // optical and SAR rasters (different pixel sizes) land on the same grid.
-  const sheet = useMemo(() => sheetSize(box.w, box.h), [box.w, box.h]);
+  // The aspect belongs to the scene that is on screen: an upload used to be
+  // stretched into the bundled fixture's rectangle.
+  const aspect = useMemo(() => {
+    const r = opticalFile?.raster;
+    return r?.width > 0 && r?.height > 0 ? r.width / r.height : SCENE_ASPECT;
+  }, [opticalFile?.raster]);
+  const sheet = useMemo(() => sheetSize(box.w, box.h, aspect), [box.w, box.h, aspect]);
   const sheetRef = useRef(sheet);
 
   const analyzing = queries.some((q) => q.status === 'analyzing');
@@ -486,7 +493,13 @@ export default function Viewer() {
   const inv = 1 / view.z;
 
   // Scale bar: drawn length and labelled distance are the same measurement.
-  const bar = useMemo(() => scaleBar({ sheetWidthPx: sheet.w, zoom: view.z }), [sheet.w, view.z]);
+  // The bar is drawn from the *scene's* extent: with the bundled footprint as a
+  // default it stayed honest only until you uploaded something 45x smaller,
+  // where it still claimed 1 km across a 0.5 km scene.
+  const bar = useMemo(
+    () => (georef ? scaleBar({ extent: sceneGeo.extent, sheetWidthPx: sheet.w, zoom: view.z }) : null),
+    [georef, sceneGeo.extent, sheet.w, view.z]
+  );
 
   const closeAoi = (points) => {
     const cleaned = points && points.length ? dedupeRing(points) : points;
@@ -982,13 +995,13 @@ export default function Viewer() {
               </span>
               <span
                 className="ml-1 hidden items-end gap-1 xl:flex"
-                title={`scale bar · ${Math.round(view.z * 100)}% zoom · 1 px = ${(bar.kmPerPx * 1000).toFixed(1)} m`}
+                title={`scale bar · ${Math.round(view.z * 100)}% zoom · 1 px = ${(bar?.kmPerPx * 1000).toFixed(1)} m`}
               >
                 <span
                   className="border-b border-l border-r border-t2/70"
-                  style={{ height: 5, width: `${bar.px}px` }}
+                  style={{ height: 5, width: `${bar?.px}px` }}
                 />
-                <span className="data-mono text-t3">{bar.label}</span>
+                <span className="data-mono text-t3">{bar?.label}</span>
               </span>
             </>
           ) : (

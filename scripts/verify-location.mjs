@@ -91,7 +91,7 @@ await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b
 await new Promise((r) => setTimeout(r, 400));
 const png = path.join(tmpdir(), 'avni-location-unlocated.png');
 await execFileAsync('convert', ['-size', '240x160', 'gradient:navy-orange', png]);
-const input = await page.$('input[type=file]');
+const input = await page.$('input[aria-label="register a scene file"]');
 await input.uploadFile(png);
 await new Promise((r) => setTimeout(r, 1600));
 
@@ -217,6 +217,53 @@ check(
   'the AOI place name follows a scene swap',
   !!moved.place && moved.place === moved.expected && moved.place !== 'MG Road',
   `header "${moved.place}" vs the rail's own coordinates -> ${moved.expected}`
+);
+
+// the sheet and the scale bar belong to the scene on screen too: the sheet used
+// to keep the bundled aspect (stretching the upload) and the bar kept the
+// bundled extent, so a 0.5 km scene still showed "1 km"
+const drawn = await page.evaluate(() => {
+  const host = document.querySelector('.scanlines');
+  const sheetEl = [...host.children].find((el) => getComputedStyle(el).transform !== 'none' && el.tagName === 'DIV');
+  const sheet = sheetEl?.getBoundingClientRect();
+  const labelEl = [...host.querySelectorAll('*')].find((n) => n.children.length === 0 && /^\d+(\.\d+)? (km|m)$/.test(n.textContent.trim()));
+  const barEl = labelEl?.parentElement?.querySelector('span');
+  const title = labelEl?.parentElement?.getAttribute('title') || '';
+  return {
+    aspect: sheet ? sheet.width / sheet.height : null,
+    label: labelEl?.textContent.trim() || '(none)',
+    px: barEl ? barEl.getBoundingClientRect().width : null,
+    metresPerPx: title.match(/1 px = ([\d.]+) m/)?.[1] ? Number(title.match(/1 px = ([\d.]+) m/)[1]) : null
+  };
+});
+const labelMetres = drawn.label.endsWith('km') ? parseFloat(drawn.label) * 1000 : parseFloat(drawn.label);
+check(
+  'the sheet takes the aspect of the uploaded raster',
+  drawn.aspect !== null && Math.abs(drawn.aspect - 32 / 24) < 0.02,
+  `sheet aspect ${drawn.aspect?.toFixed(3)} (the upload is 32x24 = 1.333, the bundled sheet 1.792)`
+);
+check(
+  'the scale bar is drawn from this scene\'s own extent',
+  drawn.metresPerPx !== null &&
+    Math.abs(drawn.px * drawn.metresPerPx - labelMetres) / labelMetres < 0.03 &&
+    labelMetres < 490,
+  `${drawn.px?.toFixed(0)} px x ${drawn.metresPerPx} m/px = ${(drawn.px * drawn.metresPerPx).toFixed(0)} m, labelled ${drawn.label} (the whole scene is ~490 m wide)`
+);
+
+// the evidence bundle has to measure the GSD on *this* scene's raster
+await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /export result/i.test(b.textContent))?.click());
+await new Promise((r) => setTimeout(r, 250));
+await page.evaluate(() => [...document.querySelectorAll('[role="menuitem"]')].find((x) => /evidence bundle/i.test(x.textContent))?.click());
+await new Promise((r) => setTimeout(r, 700));
+const gsd = await page.evaluate(async () => {
+  const bundle = JSON.parse(await window.__avniBlobs[window.__avniBlobs.length - 1].text());
+  const rail = [...document.querySelectorAll('span.pill')].map((x) => x.textContent).find((t) => /m\/px/.test(t)) || '';
+  return { bundle: bundle.scene.ground_sample_distance, raster: bundle.scene.raster, rail };
+});
+check(
+  'the evidence bundle measures GSD on the exported scene\'s own raster',
+  !!gsd.bundle && gsd.rail.includes(gsd.bundle) && gsd.raster?.width === 32 && gsd.raster?.height === 24,
+  `bundle ${gsd.bundle} (${JSON.stringify(gsd.raster)}) vs the rail's ${gsd.rail}`
 );
 
 // and the layer export has to describe *this* scene: the geometry used to be

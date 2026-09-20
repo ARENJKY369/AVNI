@@ -241,6 +241,19 @@ Both now take the footprint they are given, all the way down through
 `uvToGeo`/`pointsToRing`/`aoiRing`, and `verify-location.mjs` reads the
 exported bytes back: `7 features · lon 77.7299–77.7349 · AOI Whitefield`.
 
+Two more came out of the same question — *does this product describe the scene
+that is on screen?* — asked of the viewer itself:
+
+| Defect | How it showed up | Root cause | Fix |
+| --- | --- | --- | --- |
+| The **sheet kept the bundled aspect ratio** and the **scale bar the bundled extent**: a 32 × 24 upload over a 0.49 km footprint was stretched into the fixture's 1.79:1 rectangle and the bar still read `1 km` across a 0.5 km scene | upload a 16 m/px GeoTIFF: rail `16 m/px`, sheet 1010 × 564 (1.792), bar `1 km` | `sheetSize(box.w, box.h)` and `scaleBar({ sheetWidthPx, zoom })` both defaulted to the bundled scene, exactly as the exports did | the sheet takes the aspect of the registered raster and the bar is drawn from the registered extent — after: sheet 1010 × 758 (1.333), bar `99 px × 0.5 m/px = 50 m`, labelled `50 m` |
+| The **evidence bundle reported a GSD 40 × too fine**: `0.4 m/px` for a scene the console itself was showing as `16 m/px` | export the JSON bundle with a 32 × 24 upload and read `scene.ground_sample_distance` | `gsdLabel(geo.extent)` fell back to `SCENE_RASTER` — the bundled pixel grid — for the pixel count | the bundle echoes the scene's own `raster` and measures the GSD on it; with no raster stated it reports `null` and says why |
+
+(The first of those fixes briefly introduced a crash of its own — an unlocated
+scene carries `extent: null`, and the scale-bar maths ran before its `georef`
+gate. `verify-location` caught it within the pass; `extentKm`/`groundSampleMetres`
+now treat a null extent or raster as "not stated" and unit tests pin that.)
+
 A fifth defect came out of feeding the console rubbish on purpose: two of the
 refusal paths (`the browser could not decode this image`, `this archive does not
 look like a Sentinel SAFE product`) never said *which* file had been refused.

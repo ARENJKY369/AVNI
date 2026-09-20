@@ -1,5 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { SCENE_GEO, UNLOCATED_GEO, aoiCentroid } from './geo.js';
+import { SCENE_GEO, SCENE_RASTER, UNLOCATED_GEO, aoiCentroid, gsdLabel } from './geo.js';
 import {
   exportAnswerGeoJSON,
   exportAnswerJSON,
@@ -59,7 +59,7 @@ const CENTROID = aoiCentroid(AOI);
 
 describe('evidence bundle (JSON)', () => {
   it('withholds coordinates when the scene has no CRS', async () => {
-    exportAnswerJSON(flood(), UNLOCATED_GEO, CENTROID, AOI);
+    exportAnswerJSON(flood(), UNLOCATED_GEO, CENTROID, AOI, SCENE_RASTER);
     expect(lastFilename).toMatch(/^avni_result_.*\.json$/);
     const text = await lastText();
     const bundle = JSON.parse(text);
@@ -73,7 +73,7 @@ describe('evidence bundle (JSON)', () => {
   });
 
   it('writes coordinates, UTM and the derived AOI area when georeferenced', async () => {
-    exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI);
+    exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI, SCENE_RASTER);
     const bundle = JSON.parse(await lastText());
     expect(bundle.geodetic.withheld).toBeUndefined();
     expect(bundle.geodetic.area_ha).toBe(4.7);
@@ -86,8 +86,29 @@ describe('evidence bundle (JSON)', () => {
     expect(bundle.scene.ground_sample_distance).toBe('16 m/px');
   });
 
-  it('never carries a gate that disagrees with the verdict', async () => {
+  it('measures the ground sample distance on the raster of the scene it exports', async () => {
+    // a 32 x 24 upload: the bundled raster size would give 0.4 m/px against the
+    // 16 m/px the console shows for the same extent
+    const shifted = { ...SCENE_GEO, extent: { minLat: 12.99, maxLat: 12.9965, minLon: 77.73, maxLon: 77.7345 } };
+    const small = { width: 32, height: 24 };
+    exportAnswerJSON(flood(), shifted, aoiCentroid(AOI, shifted), AOI, small);
+    const bundle = JSON.parse(await lastText());
+    expect(bundle.scene.raster).toEqual({ width: 32, height: 24 });
+    expect(bundle.scene.ground_sample_distance).toBe(gsdLabel(shifted.extent, small));
+    expect(bundle.scene.ground_sample_distance).not.toBe(gsdLabel(shifted.extent, SCENE_RASTER));
+    // extent / pixels is only meaningful with the pixels
+    expect(bundle.scene.ground_sample_distance_source).toMatch(/extent \/ raster pixels/);
+  });
+
+  it('says so instead of inventing a GSD when the raster size is unknown', async () => {
     exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI);
+    const bundle = JSON.parse(await lastText());
+    expect(bundle.scene.ground_sample_distance).toBeNull();
+    expect(bundle.scene.ground_sample_distance_source).toMatch(/did not declare a raster size/);
+  });
+
+  it('never carries a gate that disagrees with the verdict', async () => {
+    exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI, SCENE_RASTER);
     const bundle = JSON.parse(await lastText());
     expect(bundle.consistency.gate).toBe(ABSTAIN_GATE);
     expect(bundle.consistency.abstained).toBe(
@@ -97,7 +118,7 @@ describe('evidence bundle (JSON)', () => {
   });
 
   it('ships the provenance of every class of number', async () => {
-    exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI);
+    exportAnswerJSON(flood(), SCENE_GEO, CENTROID, AOI, SCENE_RASTER);
     const bundle = JSON.parse(await lastText());
     expect(bundle.provenance.derived.scale_bar).toMatch(/one measurement/);
     expect(bundle.provenance.fixture.answer_text).toMatch(/answer bank/);

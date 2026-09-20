@@ -58,18 +58,22 @@ export const SCENE_EXTENT = {
 };
 
 export function extentKm(extent = SCENE_EXTENT) {
-  const midLat = (extent.minLat + extent.maxLat) / 2;
+  // null is what an unlocated scene carries in its `extent` field: treat it as
+  // "no extent given" rather than crashing on extent.minLat
+  const e = extent || SCENE_EXTENT;
+  const midLat = (e.minLat + e.maxLat) / 2;
   return {
-    widthKm: ((extent.maxLon - extent.minLon) * metresPerDegreeLon(midLat)) / 1000,
-    heightKm: ((extent.maxLat - extent.minLat) * metresPerDegreeLat(midLat)) / 1000
+    widthKm: ((e.maxLon - e.minLon) * metresPerDegreeLon(midLat)) / 1000,
+    heightKm: ((e.maxLat - e.minLat) * metresPerDegreeLat(midLat)) / 1000
   };
 }
 
 // Ground sample distance in metres per pixel, per axis. Product of the extent
 // and the raster — never a typed-in constant.
 export function groundSampleMetres(extent = SCENE_EXTENT, raster = SCENE_RASTER) {
+  const r = raster?.width > 0 && raster?.height > 0 ? raster : SCENE_RASTER;
   const { widthKm, heightKm } = extentKm(extent);
-  return { x: (widthKm * 1000) / raster.width, y: (heightKm * 1000) / raster.height };
+  return { x: (widthKm * 1000) / r.width, y: (heightKm * 1000) / r.height };
 }
 
 export function gsdLabel(extent = SCENE_EXTENT, raster = SCENE_RASTER) {

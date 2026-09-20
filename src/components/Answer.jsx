@@ -15,7 +15,7 @@ import { exportAnswerGeoJSON, exportAnswerJSON, exportAnswerMarkdown } from '../
 import { useEscape } from '../lib/hooks.js';
 
 function ExportMenu({ payload, centroid, georef, aoiPoints }) {
-  const { toast, sceneGeo } = useApp();
+  const { toast, sceneGeo, opticalFile } = useApp();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef(null);
   const triggerRef = useRef(null);
@@ -37,7 +37,9 @@ function ExportMenu({ payload, centroid, georef, aoiPoints }) {
   const item =
     'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-t2 transition-colors hover:bg-white/5 hover:text-t1';
   const fire = (fn, msg) => () => {
-    fn(payload, sceneGeo, centroid, aoiPoints);
+    // the raster travels with the export: extent / pixels is only true for the
+    // scene that is on screen
+    fn(payload, sceneGeo, centroid, aoiPoints, opticalFile?.raster || null);
     toast(msg);
     setOpen(false);
   };

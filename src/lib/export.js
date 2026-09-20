@@ -57,8 +57,12 @@ const geodeticBlock = (payload, geo, centroid, aoiPoints) => {
   };
 };
 
-export function exportAnswerJSON(payload, geo, centroid, aoiPoints) {
+export function exportAnswerJSON(payload, geo, centroid, aoiPoints, raster = null) {
   const georef = isGeoreferenced(geo);
+  // Ground sample distance is extent / *this scene's* raster. Left to default it
+  // fell back to the bundled raster size, so a scene whose own grid is 32 x 24
+  // exported a GSD 40x too fine (0.4 m/px against the 16 m/px on screen).
+  const gsdKnown = georef && raster?.width > 0 && raster?.height > 0;
   // Built explicitly rather than spread: the withheld block can never be
   // overwritten by a stray field from the payload.
   const bundle = {
@@ -78,8 +82,13 @@ export function exportAnswerJSON(payload, geo, centroid, aoiPoints) {
     georeference: georefBlock(geo),
     geodetic: geodeticBlock(payload, geo, centroid, aoiPoints),
     scene: {
-      ground_sample_distance: georef ? gsdLabel(geo.extent) : null,
-      ground_sample_distance_source: PROVENANCE.derived.ground_sample_distance
+      raster: gsdKnown ? { width: raster.width, height: raster.height } : null,
+      ground_sample_distance: gsdKnown ? gsdLabel(geo.extent, raster) : null,
+      ground_sample_distance_source: gsdKnown
+        ? PROVENANCE.derived.ground_sample_distance
+        : georef
+          ? 'not reported: this scene did not declare a raster size'
+          : null
     },
     provenance: PROVENANCE,
     followups: payload.followups
