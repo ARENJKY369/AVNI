@@ -300,7 +300,7 @@ export async function loadSceneSource(url, { name = 'scene', label = null, cross
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   ctx.imageSmoothingQuality = 'high';
   ctx.drawImage(image, 0, 0);
-  let pixels = null;
+  let pixels;
   try {
     pixels = ctx.getImageData(0, 0, width, height);
   } catch {

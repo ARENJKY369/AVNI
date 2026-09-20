@@ -10,7 +10,6 @@
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { writeArrayBuffer } from 'geotiff';
 import { zipSync } from 'fflate';
 
 const OUT = path.resolve('fixtures');
@@ -18,11 +17,6 @@ const TMP = path.join(OUT, '.tmp');
 const SCENE = path.resolve('src/assets/scene-optical.jpg');
 
 // demo footprint: tile 43REP, 256 x 144 px at 60 m — a 15.36 x 8.64 km chip
-const W = 256;
-const H = 144;
-const PIXEL_M = 60;
-const E0 = 782000; // westing of the chip inside zone 43N
-const N0 = 1436000;
 const SENSING = '2025-08-14T05:17:42.000Z';
 const TILE = '43REP';
 

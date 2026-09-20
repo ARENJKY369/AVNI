@@ -8,6 +8,7 @@
 import { launch, watchPage, APP_URL, SHOTS_DIR, prepareDirs } from './browser.mjs';
 import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { writeArrayBuffer } from 'geotiff';
 import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -181,6 +182,42 @@ check(
 await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Restore bundled scene'))?.click());
 await new Promise((r) => setTimeout(r, 600));
 check('restore brings the declared footprint back', /gazetteer/.test((await header()) || ''), await header());
+
+// a georeferenced scene 14 km away: the AOI place name has to follow the new
+// footprint instead of naming the old scene (the header is memoised)
+const whitefield = path.join(tmpdir(), 'avni-verify-whitefield.tif');
+const W = 32;
+const H = 24;
+const PIXEL_M2 = 16;
+const LON0 = 77.73;
+const LAT0 = 12.99;
+const values = new Uint8Array(W * H);
+for (let i = 0; i < values.length; i += 1) values[i] = (i * 7) % 255;
+const tags = {
+  width: W,
+  height: H,
+  GeographicTypeGeoKey: 4326,
+  ModelTypeGeoKey: 2,
+  RasterTypeGeoKey: 1,
+  ModelPixelScale: [PIXEL_M2 / (111320 * Math.cos((LAT0 * Math.PI) / 180)), PIXEL_M2 / 110574, 0],
+  ModelTiepoint: [0, 0, 0, LON0, LAT0 + (H * PIXEL_M2) / 110574, 0]
+};
+writeFileSync(whitefield, Buffer.from(await writeArrayBuffer(values, tags)));
+await (await page.$('input[type=file]')).uploadFile(whitefield);
+await new Promise((r) => setTimeout(r, 2000));
+const moved = await page.evaluate(async () => {
+  const block = document.querySelector('header').innerText.replace(/\n+/g, ' · ');
+  const place = (block.match(/AOI · ([^·]*)·/) || [])[1]?.trim() || null;
+  const at = document.querySelector('aside').innerText.match(/(\d+\.\d+)°N\s+(\d+\.\d+)°E/);
+  const geo = await import('/src/lib/geo.js');
+  const expected = at ? geo.placeSummary(parseFloat(at[1]), parseFloat(at[2])).name : null;
+  return { place, expected };
+});
+check(
+  'the AOI place name follows a scene swap',
+  !!moved.place && moved.place === moved.expected && moved.place !== 'MG Road',
+  `header "${moved.place}" vs the rail's own coordinates -> ${moved.expected}`
+);
 
 await browser.close();
 const failed = results.filter((r) => !r[1]).length;

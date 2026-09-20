@@ -86,12 +86,13 @@ export function geodesicInverse(lat1, lon1, lat2, lon2) {
   let lambda = L;
   let lambdaP;
   let iterations = 0;
-  let sinSigma = 0;
-  let cosSigma = 0;
-  let sigma = 0;
-  let sinAlpha = 0;
-  let cosSqAlpha = 0;
-  let cos2SigmaM = 0;
+  // loop-carried: assigned at the top of every do-body, read after the loop
+  let sinSigma;
+  let cosSigma;
+  let sigma;
+  let sinAlpha;
+  let cosSqAlpha;
+  let cos2SigmaM;
 
   do {
     const sinLambda = Math.sin(lambda);

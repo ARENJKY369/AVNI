@@ -74,7 +74,6 @@ const edgeBands = () =>
     const canvas = document.querySelector('.scanlines canvas');
     if (!canvas) return null;
     const ctx = canvas.getContext('2d');
-    const host = document.querySelector('.scanlines').getBoundingClientRect();
     // the scene sheet is the child carrying the pan/zoom transform — the
     // canvas sits before it and is always the size of the viewport
     const sheetEl = [...document.querySelector('.scanlines').children].find(

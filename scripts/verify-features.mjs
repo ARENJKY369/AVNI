@@ -7,9 +7,13 @@
 // GeoTIFF/COG/JP2/SAFE reading, the raster sampler and the segmentation are
 // backed by what the browser actually did.
 import path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { tmpdir } from 'node:os';
 import { launch, watchPage, APP_URL, SHOTS_DIR, prepareDirs } from './browser.mjs';
 
 prepareDirs();
+const execFileAsync = promisify(execFile);
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 const check = (name, ok, detail = '') => {
@@ -102,6 +106,79 @@ await page.evaluate(() => {
   if (b) b.click();
 });
 await wait(1200);
+
+// ---------------------------------------------------------------- second epoch
+// An attached epoch has to be decoded and actually compared — naming your file
+// as the second epoch while the swipe shows the shipped pair is a lie.
+const epochPng = path.join(tmpdir(), 'avni-verify-epochB.png');
+await execFileAsync('convert', ['-size', '240x180', 'xc:#00b000', epochPng]);
+await page.evaluate(() => {
+  const b = [...document.querySelectorAll('button')].find((x) =>
+    /attach second/i.test(x.textContent + ' ' + (x.getAttribute('aria-label') || '') + ' ' + (x.getAttribute('title') || ''))
+  );
+  if (b) b.click();
+});
+const epochInput = await page.$('input[aria-label="attach second scene file"]');
+check('the second-epoch dropzone offers a file input', !!epochInput, epochInput ? 'input[aria-label="attach second scene file"]' : 'not rendered');
+if (epochInput) {
+  await epochInput.uploadFile(epochPng);
+  await wait(1800);
+  const attached = await page.evaluate(() => ({
+    modes: [...document.querySelectorAll('[role="radio"]')].map((r) => r.textContent.trim()),
+    status: [...document.querySelectorAll('[role="status"]')].map((n) => n.textContent).join(' | '),
+    epochRow: document.querySelector('button[aria-label="detach second epoch"]')?.closest('div')?.textContent?.trim() || '(no epoch row)'
+  }));
+  check(
+    'a file attaches as the second epoch',
+    /second epoch registered/.test(attached.status) && attached.modes.includes('CHANGE ΔT'),
+    `${attached.epochRow} · ${attached.status.slice(0, 90)}`
+  );
+  await page.evaluate(() => {
+    const r = [...document.querySelectorAll('[role="radio"]')].find((x) => x.textContent.trim() === 'CHANGE ΔT');
+    if (r) r.click();
+  });
+  await wait(700);
+  const swiped = await page.evaluate(() => {
+    const canvas = document.querySelector('.scanlines canvas');
+    const ctx = canvas.getContext('2d');
+    const w = canvas.width;
+    const h = canvas.height;
+    const d = ctx.getImageData(Math.round(w * 0.15), Math.round(h * 0.4), Math.round(w * 0.2), Math.max(1, Math.round(h * 0.2))).data;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      r += d[i];
+      g += d[i + 1];
+      b += d[i + 2];
+      n += 1;
+    }
+    return {
+      r: Math.round(r / n),
+      g: Math.round(g / n),
+      b: Math.round(b / n),
+      mode: [...document.querySelectorAll('[role="radio"]')].find((x) => x.getAttribute('aria-checked') === 'true')?.textContent.trim()
+    };
+  });
+  check(
+    'the change view compares the attached epoch, not the shipped pair',
+    swiped.mode === 'CHANGE ΔT' && swiped.g > 120 && swiped.r < 60 && swiped.b < 60,
+    `epoch side of the swipe is rgb(${swiped.r}, ${swiped.g}, ${swiped.b})`
+  );
+  await shot('feat-09-second-epoch.jpg');
+  await page.evaluate(() => document.querySelector('button[aria-label="detach second epoch"]')?.click());
+  await wait(500);
+  const detached = await page.evaluate(() => ({
+    modes: [...document.querySelectorAll('[role="radio"]')].map((r) => r.textContent.trim()),
+    status: [...document.querySelectorAll('[role="status"]')].map((n) => n.textContent).join(' | ')
+  }));
+  check(
+    'detaching returns to the single-epoch view',
+    !detached.modes.includes('CHANGE ΔT') && /second epoch detached/.test(detached.status),
+    detached.modes.join('/')
+  );
+}
 
 // ---------------------------------------------------------------- zoom path
 const before = await readState();

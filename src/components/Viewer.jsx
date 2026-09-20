@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icons.jsx';
 import { useApp } from '../state/AppState.jsx';
 import {
@@ -12,8 +12,6 @@ import {
   PINS,
   WATER_PATHS
 } from '../data/overlays.js';
-import { SCENES } from '../data/mock.js';
-import { useEscape, useMedia } from '../lib/hooks.js';
 import { clampView, drawScene, pointFromUv, uvFromPoint } from '../lib/scene-render.js';
 import { maskToRgba, stopNote } from '../lib/segment.js';
 import {
@@ -417,7 +415,9 @@ export default function Viewer() {
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => el.removeEventListener('wheel', onWheel);
-  }, []);
+    // `box` is a dependency: clampView needs the *current* container size, and
+    // a listener captured at mount would clamp against the first measurement
+  }, [box]);
 
   // The mask is built once per segmentation and kept as a canvas so the
   // renderer can project it exactly like the imagery it came from.
@@ -460,16 +460,15 @@ export default function Viewer() {
     });
   }, [box, sheet, view, drawSources, maskDrawable]);
 
-  const zoomBy = (f) => {
+  const zoomBy = useCallback((f) => {
     setView((v) => {
-      const { w, h } = sheetRef.current;
       const z2 = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, v.z * f));
       if (z2 <= MIN_ZOOM + 1e-4) return { z: 1, x: 0, y: 0 };
       const next = clampView({ z: z2, x: v.x * (z2 / v.z), y: v.y * (z2 / v.z) }, box, sheetRef.current);
       return { z: next.z, x: next.x, y: next.y };
     });
-  };
-  const fitScene = () => setView({ z: 1, x: 0, y: 0 });
+  }, [box]);
+  const fitScene = useCallback(() => setView({ z: 1, x: 0, y: 0 }), []);
 
   // +/- zoom, 0 fits the scene — same map muscle memory as QGIS
   useEffect(() => {
@@ -482,7 +481,7 @@ export default function Viewer() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [zoomBy, fitScene]);
 
   const inv = 1 / view.z;
 

@@ -54,6 +54,8 @@ export function AppProvider({ children }) {
   // every timer and object URL this provider creates is tracked so unmounting
   // (or replacing a scene) does not leave them behind
   const timers = useRef(new Set());
+  // nothing in the provider hands out object URLs any more (every reader decodes
+  // to pixels), but the ledger stays the single place that would revoke one
   const objectUrls = useRef(new Set());
 
   useEffect(
@@ -100,26 +102,29 @@ export function AppProvider({ children }) {
 
   const toggleBand = useCallback(
     (id) => {
-      setBands((b) => {
-        const next = b.map((x) => (x.id === id ? { ...x, on: !x.on } : x));
-        const on = next.filter((x) => x.on).length;
-        const changed = next.find((x) => x.id === id);
-        // the band choice is a real input: it names the pass the next query runs
-        toast(`${changed.name} ${changed.on ? 'added to' : 'removed from'} the next pass · ${on} band${on === 1 ? '' : 's'}`);
-        return next;
-      });
+      const current = bands.find((x) => x.id === id);
+      if (!current) return;
+      const next = bands.map((x) => (x.id === id ? { ...x, on: !x.on } : x));
+      setBands(next);
+      const on = next.filter((x) => x.on).length;
+      // the band choice is a real input: it names the pass the next query runs.
+      // The toast is fired *here*, not inside the updater: an updater must be
+      // pure (StrictMode runs it twice, and a nested setState during render is
+      // dropped) — the old in-updater version produced no toast at all.
+      toast(`${current.name} ${current.on ? 'removed from' : 'added to'} the next pass · ${on} band${on === 1 ? '' : 's'}`);
     },
-    [toast]
+    [bands, toast]
   );
 
   const toggleLayer = useCallback(
-    (id) =>
-      setLayers((l) => {
-        const on = !l[id].on;
-        if (id === 'disagreement' && on) toast('disagreement layer on — conflicts drawn in-scene');
-        return { ...l, [id]: { ...l[id], on } };
-      }),
-    [toast]
+    (id) => {
+      const current = layers[id];
+      if (!current) return;
+      const on = !current.on;
+      setLayers((l) => ({ ...l, [id]: { ...l[id], on } }));
+      if (id === 'disagreement' && on) toast('disagreement layer on — conflicts drawn in-scene');
+    },
+    [layers, toast]
   );
 
   const sendQuery = useCallback(
@@ -149,25 +154,55 @@ export function AppProvider({ children }) {
     [bands, sceneB, sceneGeo]
   );
 
-  const newObjectUrl = (file) => {
-    const url = URL.createObjectURL(file);
-    objectUrls.current.add(url);
-    return url;
-  };
-
   const attachSceneB = useCallback(
     async (file) => {
       const isFile = !!file && typeof file === 'object' && typeof file.name === 'string';
-      const name = isFile ? file.name : SCENES.opticalB.file;
-      const previewable = isFile ? await canRenderPreview(file) : false;
-      setSceneB({
-        ...SCENES.opticalB,
-        file: name,
-        src: previewable ? newObjectUrl(file) : SCENES.opticalB.src,
-        note: isFile && !previewable ? `no preview for ${name} — analysis-service epoch shown` : null
-      });
       setAttachOpen(false);
-      toast(`second epoch registered · ${name}`);
+      // no file: the analysis-service epoch is the honest default, and the pane
+      // keeps naming it as the shipped pair rather than as your acquisition
+      if (!isFile) {
+        setSceneB({ ...SCENES.opticalB, canvas: null, pixels: null, note: 'shipped change pair — no second acquisition attached' });
+        toast(`second epoch registered · ${SCENES.opticalB.file}`);
+        return;
+      }
+      setSceneBusy({ stage: 'reading second epoch', name: file.name });
+      try {
+        // the epoch is decoded with the same readers as the primary scene, so
+        // the swipe compares *your* two acquisitions instead of the demo pair
+        const scene = await readSceneFile(file, { onProgress: (p) => setSceneBusy({ ...p, name: file.name }) });
+        const source = sourceFromScene(scene);
+        const georef = scene.georef || null;
+        const georeferenced = georef?.status === 'georeferenced';
+        setSceneB({
+          ...SCENES.opticalB,
+          file: scene.fileName,
+          label: scene.formatLabel,
+          raster: { width: scene.width, height: scene.height },
+          src: null,
+          canvas: source?.canvas || null,
+          bitmap: source?.bitmap || null,
+          pixels: source?.pixels || null,
+          georef,
+          formatLabel: scene.formatLabel,
+          bands: scene.bands || [],
+          notes: scene.notes || [],
+          origin: 'uploaded',
+          uploaded: true,
+          // both epochs are drawn into one declared footprint — say so when the
+          // second one carries no georeference of its own
+          note: georeferenced
+            ? null
+            : `epoch has no CRS of its own (${scene.formatLabel}) — the change pair assumes it shares the scene footprint`
+        });
+        toast(`second epoch registered · ${scene.fileName} · ${describeScene(scene)}`);
+      } catch (e) {
+        // a second epoch that cannot be read must not silently leave the demo
+        // pair in place under the new file's name
+        const why = e?.sceneError ? e.message : `could not read ${file.name}`;
+        toast(`not registered · ${why}`);
+      } finally {
+        setSceneBusy(null);
+      }
     },
     [toast]
   );

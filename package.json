@@ -3,7 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "type": "module",
-  "description": "AVNI \u2014 natural-language interrogation of optical + SAR scenes. Frontend build with a mock analysis service, honest geodetic provenance, and a reproducible evidence harness.",
+  "description": "AVNI — natural-language interrogation of optical + SAR scenes. Frontend build with a mock analysis service, honest geodetic provenance, and a reproducible evidence harness.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -19,7 +19,7 @@
     "verify:segment": "node scripts/verify-segment.mjs",
     "verify:console": "node scripts/verify-console.mjs",
     "verify:a11y": "node scripts/a11y.mjs",
-    "verify": "npm run verify:console && npm run verify:zoom && npm run verify:segment && npm run verify:location && npm run verify:a11y && npm run verify:features",
+    "verify": "npm run lint && npm run verify:console && npm run verify:zoom && npm run verify:segment && npm run verify:location && npm run verify:a11y && npm run verify:features",
     "verify:features": "node scripts/verify-features.mjs"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@cornerstonejs/codec-openjpeg": "^1.3.6",
+    "@eslint/js": "^10.0.1",
     "@sparticuz/chromium": "^153.0.0",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/react": "^16.3.0",
@@ -35,9 +36,13 @@
     "@vitest/coverage-v8": "^5.0.1",
     "autoprefixer": "^10.4.20",
     "axe-core": "^4.13.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
     "fast-xml-parser": "^5.11.1",
     "fflate": "^0.8.3",
     "geotiff": "^3.0.5",
+    "globals": "^17.12.0",
     "jsdom": "^26.0.0",
     "postcss": "^8.4.49",
     "puppeteer-core": "^25.11.0",

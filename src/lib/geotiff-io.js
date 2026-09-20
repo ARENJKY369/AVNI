@@ -68,7 +68,6 @@ export function geoFromTags({ geoKeys = {}, bbox, origin, resolution, width, hei
   const projected = geoKeys.ProjectedCSTypeGeoKey ?? geoKeys.ProjectedCSType;
   const geographic = geoKeys.GeographicTypeGeoKey ?? geoKeys.GeographicType;
   const modelType = geoKeys.GTModelTypeGeoKey;
-  const citation = (geoKeys.GTCitationGeoKey || '').trim();
   if (!bbox || bbox.length !== 4) return null;
 
   const [minX, minY, maxX, maxY] = bbox;
@@ -306,6 +305,7 @@ export async function readGeoTiff(input, { maxPixels = 4_000_000, blockSize = 65
     },
     notes: [
       tiled ? `tiled layout${localLayout?.tileWidth ? ` (${localLayout.tileWidth} px blocks)` : ''}` : 'stripped layout',
+      (geoKeys.GTCitationGeoKey || '').trim() ? `citation: ${String(geoKeys.GTCitationGeoKey).trim()}` : null,
       overviews ? `${overviews} overview level${overviews > 1 ? 's' : ''}` : null,
       scale < 1 ? `read at 1/${Math.round(1 / scale)} resolution` : null,
       input?.url ? 'read over HTTP with range requests' : null

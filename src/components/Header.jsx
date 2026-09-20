@@ -29,7 +29,10 @@ export default function Header({ onHelp }) {
   const georef = isGeoreferenced(sceneGeo);
   const place = useMemo(
     () => (georef ? placeSummary(aoiCentroid(aoi, sceneGeo).lat, aoiCentroid(aoi, sceneGeo).lon) : null),
-    [georef, aoi]
+    // sceneGeo belongs here: swapping the scene keeps `georef` true while the
+    // AOI moves hundreds of kilometres, and a stale memo kept naming the old
+    // place (the rail showed the new coordinates, the header the old name)
+    [georef, aoi, sceneGeo]
   );
 
   const exportLayers = () => {

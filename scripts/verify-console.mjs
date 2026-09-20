@@ -2,7 +2,7 @@
 // draw-mode click isolation, scroll behaviour, export actions, the unlocated
 // upload path and the responsive shell.
 //   npm run verify:console
-import { launch, watchPage, APP_URL, DOWNLOAD_DIR, prepareDirs } from './browser.mjs';
+import { launch, watchPage, APP_URL, prepareDirs } from './browser.mjs';
 import { writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -14,10 +14,38 @@ const browser = await launch({ width: 1680, height: 950 });
 const results = [];
 const execFileAsync = promisify(execFile);
 const check = (name, ok, detail = '') => { results.push([name, ok, detail]); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  ${String(detail).slice(0, 110)}`); };
+// the live display source, read off the viewer's own radio group
+const readMode = () =>
+  page.evaluate(() => {
+    const g = document.querySelector('[role="radiogroup"][aria-label="display source"]');
+    const on = g && [...g.querySelectorAll('[role="radio"]')].find((r) => r.getAttribute('aria-checked') === 'true');
+    return on ? on.textContent.trim() : '(none)';
+  });
+const setMode = (label) =>
+  page.evaluate((l) => {
+    const g = document.querySelector('[role="radiogroup"][aria-label="display source"]');
+    const r = g && [...g.querySelectorAll('[role="radio"]')].find((x) => x.textContent.trim() === l);
+    r && r.click();
+  }, label);
 
 const page = watchPage(await browser.newPage(), 'main');
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
+// an export is only honest if the bytes reach the browser: capture every blob
+// the app hands to a download link
+await page.evaluateOnNewDocument(() => {
+  window.__avniBlobs = [];
+  const orig = URL.createObjectURL.bind(URL);
+  URL.createObjectURL = (blob) => {
+    window.__avniBlobs.push(blob);
+    return orig(blob);
+  };
+});
+const readLastBlob = () =>
+  page.evaluate(async () => {
+    const b = window.__avniBlobs[window.__avniBlobs.length - 1];
+    return b ? await b.text() : null;
+  });
 await page.goto(APP_URL, { waitUntil: 'networkidle0', timeout: 60000 });
 await new Promise((r) => setTimeout(r, 900));
 
@@ -42,6 +70,52 @@ const card = await page.evaluate(() => {
 check('flood consistency 0.47 above the gate', card.consistency === '0.47' && card.declined === false, JSON.stringify(card));
 check('reason + trace derive the same stable count', card.stable === '4' && card.trace === '0.47 (4/8 stable)', `${card.stable} / ${card.trace}`);
 check('sigma0 drawn on a real dB axis (no fake bars)', card.hasDbAxis === true);
+
+// ---------- 1b. a toggle has to report what it did
+// both toggles used to fire their toast from inside a state updater; React drops
+// that nested update, so the console never said a word (StrictMode runs the
+// updater twice as well)
+const layerPressed = () =>
+  page.evaluate(() => {
+    const b = [...document.querySelectorAll('button[aria-pressed]')].find((x) => /disagreement/i.test(x.textContent));
+    return b ? b.getAttribute('aria-pressed') === 'true' : null;
+  });
+const clickLayer = () =>
+  page.evaluate(() => {
+    const b = [...document.querySelectorAll('button[aria-pressed]')].find((x) => /disagreement/i.test(x.textContent));
+    if (b) b.click();
+  });
+const startedOn = await layerPressed();
+if (startedOn) {
+  await clickLayer();
+  await new Promise((r) => setTimeout(r, 250));
+}
+await clickLayer();
+await new Promise((r) => setTimeout(r, 400));
+const layerToasts = await page.evaluate(() =>
+  [...document.querySelectorAll('div[role="status"]')].map((n) => n.textContent.replace(/\s+/g, ' ')).join(' | ')
+);
+check(
+  'turning a layer on reports it in the toast rail',
+  (await layerPressed()) === true && /disagreement layer on/.test(layerToasts),
+  layerToasts.slice(-90)
+);
+const bandRow = await page.evaluate(() => {
+  const b = [...document.querySelectorAll('aside button')].find((x) => x.querySelector('.chk'));
+  if (!b) return null;
+  const label = b.textContent.replace(/\s+/g, ' ').trim();
+  b.click();
+  return label;
+});
+await new Promise((r) => setTimeout(r, 400));
+const bandToasts = await page.evaluate(() =>
+  [...document.querySelectorAll('div[role="status"]')].map((n) => n.textContent.replace(/\s+/g, ' ')).join(' | ')
+);
+check(
+  'toggling a band reports the pass it changes',
+  !!bandRow && /(added to|removed from) the next pass/.test(bandToasts),
+  `${bandRow} -> ${bandToasts.slice(-80)}`
+);
 
 // ---------- 2. scale bar tells the truth
 const sb = await page.evaluate(() => {
@@ -126,6 +200,25 @@ await new Promise((r) => setTimeout(r, 700));
 const afterCount = await page.evaluate(() => document.querySelectorAll('.rounded-br-sm').length);
 const toastText = await page.evaluate(() => document.body.innerText.match(/footprint exported[^\n]*/)?.[0] || '');
 check('export follow-up exports instead of re-asking', beforeCount === afterCount && /export/.test(toastText), `queries ${beforeCount} -> ${afterCount}; "${toastText}"`);
+const footprint = await readLastBlob();
+const parseJSON = (text) => { try { return JSON.parse(text); } catch { return null; } };
+const footprintJSON = parseJSON(footprint);
+const features = footprintJSON?.features || [];
+// the answer geometry is a centroid Point plus an AOI Polygon; the ring has to
+// be closed and inside the subcontinent — a pixel-space ring would not be
+const ring = features.flatMap((f) => (f.geometry?.type === 'Polygon' ? f.geometry.coordinates[0] || [] : []));
+const ringClosed =
+  ring.length >= 4 &&
+  ring[0][0] === ring[ring.length - 1][0] &&
+  ring[0][1] === ring[ring.length - 1][1];
+const geographic = ring.length > 0 && ring.every(([lon, lat]) => lon > 60 && lon < 100 && lat > 5 && lat < 40);
+check(
+  'the exported footprint is a real georeferenced GeoJSON',
+  footprintJSON?.type === 'FeatureCollection' && features.length >= 2 && ringClosed && geographic,
+  footprintJSON
+    ? `${footprint.length} bytes, ${features.length} features (${features.map((f) => f.geometry?.type).join('+')}), ring ${ring.length} vertices, closed=${ringClosed}`
+    : `unparseable: ${String(footprint).slice(0, 60)}`
+);
 
 // ---------- 6. an unreadable file is refused outright, not half-registered
 // Nothing from the previous scene may end up labelled with the new file's
@@ -154,6 +247,11 @@ check(
   'the failed name must not survive as the registered scene'
 );
 const stillBundled = await railScene();
+check(
+  'a refused upload leaves the working scene untouched',
+  beforeBroken.imagery.length > 0 && stillBundled.imagery === beforeBroken.imagery,
+  `imagery block ${beforeBroken.imagery === stillBundled.imagery ? 'unchanged' : 'CHANGED'} (${stillBundled.imagery.length} chars)`
+);
 check(
   'the previous scene keeps its own name after a failed upload',
   afterBroken.refused && afterBroken.saysWhy && /S2_L2A|RISAT/.test(stillBundled.imagery) && !/avni-verify-broken/.test(stillBundled.imagery),
@@ -209,12 +307,32 @@ check('restore returns the declared footprint', restored.georef && restored.noWa
 
 check('no page errors during the session', errors.length === 0, errors.join(' | ').slice(0, 160));
 
-// ---------- 7. keyboard map must not fight the composer
+// ---------- 7. keyboard map: live on the shell, inert inside the composer
+// focus has to leave the composer first, or the key lands in the text box
+await page.evaluate(() => { document.activeElement?.blur?.(); });
+await new Promise((r) => setTimeout(r, 150));
+const modeBeforeKeys = await readMode();
+// press the digit for a mode that is *not* the live one, so the check proves a flip
+const flip = modeBeforeKeys === 'OPTICAL' ? { key: '2', label: 'SAR' } : { key: '1', label: 'OPTICAL' };
+await page.keyboard.press(flip.key);
+await new Promise((r) => setTimeout(r, 250));
+const modeAfterKey = await readMode();
+check(
+  'digit keys flip the display source on the shell',
+  modeAfterKey === flip.label && modeBeforeKeys !== flip.label,
+  `"${flip.key}" ${modeBeforeKeys} -> ${modeAfterKey}`
+);
+await setMode(modeBeforeKeys === '(none)' ? 'OPTICAL' : modeBeforeKeys);
+await new Promise((r) => setTimeout(r, 200));
 await page.evaluate(() => { document.querySelector('#composer-input').focus(); });
 await page.keyboard.type('1234');
-const modeAfterTyping = await page.evaluate(() => document.body.innerText.match(/BLEND ([\d.]+)/)?.[1] ? 'blend-open' : 'not-blend');
+const modeAfterTyping = await readMode();
 const composerValue = await page.evaluate(() => document.querySelector('#composer-input').value);
-check('digits typed in the composer do not flip display modes', composerValue === '1234', `value=${composerValue}`);
+check(
+  'digits typed in the composer do not flip display modes',
+  composerValue === '1234' && modeAfterTyping === modeBeforeKeys,
+  `value=${composerValue} mode ${modeBeforeKeys} -> ${modeAfterTyping}`
+);
 await page.evaluate(() => { document.querySelector('#composer-input').value = ''; });
 
 // ---------- 8. short viewport: the sticky AOI block no longer hides the last layer

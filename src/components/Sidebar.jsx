@@ -29,8 +29,7 @@ function Section({ label, right, children, className = '' }) {
 }
 
 function Dropzone() {
-  const { uploadHover, setUploadHover, registerUpload, registerSafeFolder, registerUrl, sceneBusy, opticalFile } =
-    useApp();
+  const { uploadHover, setUploadHover, registerUpload, registerSafeFolder, registerUrl, sceneBusy } = useApp();
   const inputRef = useRef(null);
   const folderRef = useRef(null);
   const [showUrl, setShowUrl] = useState(false);

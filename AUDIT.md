@@ -211,3 +211,44 @@ and what changed:
 several disjoint parts can only become the largest of them. The UI now names the count and which part
 the outline follows; a multi-polygon AOI would have to reach the area maths and the exporters, which
 is a larger change than this pass.
+
+---
+
+## 9. Third pass — the whole-repo sweep
+
+The brief was "check the whole repo, make sure no bugs are to be found". Nothing was taken on trust:
+`npm run lint` was made to actually run (it had no config and no eslint dependency, so it had never
+executed), and a second wave of correctness rules was enabled alongside a read-through and
+instrumented browser probes. `npm run lint` is now the first step of `npm run verify`.
+
+Four defects came out of it. None of them were visible in the screenshots, and three of them only
+appear when you *use* the console the way an analyst would.
+
+| Defect | How it showed up | Root cause | Fix |
+| --- | --- | --- | --- |
+| Attaching a second epoch **as a file** threw `canRenderPreview is not defined` and registered nothing | drop a PNG/GeoTIFF on the attach dropzone: `pageerror` in the console, rail unchanged | `attachSceneB` called a helper that was never imported (there is no bundler warning for a missing named import at runtime — it is a `ReferenceError` in the handler) | the epoch is now decoded through the same readers as the primary scene |
+| Turning a layer or a band on or off said **nothing at all** | click *Disagreement* or a band row: no toast, no warning | the toast was fired *inside* a `setState` updater — React drops a `setState` made while rendering, and StrictMode runs the updater twice | the toast is computed from current state and fired outside the updater |
+| An attached epoch was **named but not compared**: the swipe kept showing the shipped pair | attach a solid-green PNG as epoch B, switch to `CHANGE ΔT`, sample the canvas: `rgb(70, 78, 78)` — the demo epoch, not green | `attachSceneB` only ever stored a name and a preview URL; the change view reads `sceneB.canvas`, which was never set | the epoch is decoded, its pixels/canvas are stored, and the pane says so when the epoch carries no CRS of its own. Verified: epoch side of the swipe reads `rgb(0, 178, 0)` |
+| The header kept naming the **old place** after the scene changed | register a scene 14 km away (Whitefield): rail says `12.9917°N 77.7325°E`, header still said *MG Road* | `placeSummary` was memoised on `[georef, aoi]` — swapping scenes keeps `georef` true and the AOI vertices unchanged, so the name was never recomputed | `sceneGeo` is a dependency |
+
+Supporting clean-ups from the same sweep, each of which had hidden something:
+
+- `npm i -D eslint …` + `eslint.config.js` (flat config) — `npm run lint` and `npm run verify` could not
+  run at all before, which is exactly how a missing import survives in a repo with a lint script.
+- Second wave of lint rules (`array-callback-return`, `no-unsafe-optional-chaining`, `eqeqeq`,
+  `no-unmodified-loop-condition`, `no-template-curly-in-string`, …) — quiet on the current tree, so
+  they only speak up for new defects.
+- `react-hooks/exhaustive-deps` found two live closures over stale state: the wheel-zoom handler
+  clamped pan against the container size measured at mount, and the `+`/`-`/`0` key map captured the
+  first `zoomBy`. Both are now dependencies.
+- Two `no-useless-assignment`s in `geodesy.js` (Vincenty loop-carried values) and `raster.js`
+  (`let pixels = null` where the try/catch decides).
+- The GeoTIFF reader read `GTCitationGeoKey` and threw it away; it is now part of the scene notes.
+- `src/lib/preview.js` was the last consumer-less module in the tree (flagged in the first pass);
+  with epoch B decoding properly it is gone.
+- Three verification scripts carried dead captures — `beforeBroken`, `modeAfterTyping`, `host` — i.e.
+  checks that were intended and never written. They are real checks now, plus new coverage for the
+  four defects above (attach-by-file, the exported GeoJSON ring, the toggle toasts, a scene swap).
+
+Suite totals after this pass: `npm run lint` clean, `npm test` 123/123, `vite build` green,
+`npm run verify` = console **26/26** → zoom → segment → location → a11y → features **22/22**.
