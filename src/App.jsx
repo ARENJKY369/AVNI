@@ -80,11 +80,18 @@ function Shell() {
         Skip to the scene
       </a>
       <Header onHelp={() => setHelp(true)} />
-      <div className="flex min-h-0 flex-1">
-        {!tools.fullscreen && <Sidebar />}
-        <Viewer />
-        {!tools.fullscreen && <QueryPanel />}
-      </div>
+      {/* one main landmark and one h1: the skip link, the landmark and the
+          document outline all have to agree about what this page is */}
+      <main className="flex min-h-0 flex-1 flex-col">
+        <h1 className="sr-only">
+          AVNI — ask a satellite scene what it knows: optical and SAR cross-check with physics verification
+        </h1>
+        <div className="flex min-h-0 flex-1">
+          {!tools.fullscreen && <Sidebar />}
+          <Viewer />
+          {!tools.fullscreen && <QueryPanel />}
+        </div>
+      </main>
       {drawer && !tools.fullscreen && (
         <div
           aria-hidden="true"

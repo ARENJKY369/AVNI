@@ -365,7 +365,11 @@ export default function Sidebar() {
               {segBusy
                 ? 'growing region from the seed…'
                 : segment
-                  ? `${segment.stats.outlineVertices} vertices · ${(segment.stats.coverage * 100).toFixed(1)}% of the scene${stopNote(segment) ? ` · ${stopNote(segment)}` : ''}`
+                  ? `${segment.stats.outlineVertices} vertices · ${segment.stats.coverage < 0.01
+                      ? (segment.stats.coverage * 100).toFixed(2)
+                      : (segment.stats.coverage * 100).toFixed(1)}% of the scene${
+                      segment.parts > 1 ? ` · ${segment.parts} areas` : ''
+                    }${stopNote(segment) ? ` · ${stopNote(segment)}` : ''}`
                   : 'click a region on the scene · shift adds · alt subtracts'}
               {segment && (
                 <span className="mt-1 flex gap-1.5">

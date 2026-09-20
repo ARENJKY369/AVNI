@@ -47,9 +47,11 @@ export default function HelpDialog({ open, onClose }) {
         className="recess relative max-h-[86vh] w-full max-w-[560px] overflow-y-auto px-5 py-4"
       >
         <div className="mb-3 flex items-center gap-2">
-          <span className="lbl" id="help-title">
+          {/* an h2: the dialog is a section of the page, and its own subsections
+              are h3 — an h3 title here breaks the document outline */}
+          <h2 className="lbl" id="help-title">
             console guide
-          </span>
+          </h2>
           <button
             onClick={onClose}
             className="icon-btn ml-auto !h-7 !w-7"

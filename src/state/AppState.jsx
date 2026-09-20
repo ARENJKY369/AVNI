@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { analyzeStages, BANDS, LAYERS, matchQuery, SCENES } from '../data/mock.js';
 import { SCENE_GEO, UNLOCATED_GEO } from '../lib/geo.js';
 import { describeScene, readSceneDirectory, readSceneFile, readSceneUrl, sourceFromScene } from '../lib/raster.js';
-import { describeSegment, segmentAt, simplifyRing, traceOutline } from '../lib/segment.js';
+import { describeSegment, segmentAt, simplifyRing, traceOutlines } from '../lib/segment.js';
 import { ensureScenes } from '../lib/scene-cache.js';
 import { checkStoreInvariants } from '../lib/invariants.js';
 
@@ -310,23 +310,39 @@ export function AppProvider({ children }) {
 
         let mask = result.mask;
         let ring = result.ring;
+        let parts = 1;
         const previous = segment?.mask;
         if (previous && previous.width === result.work.width && previous.height === result.work.height && op !== 'replace') {
           const merged = new Uint8Array(mask.length);
           for (let i = 0; i < mask.length; i += 1) {
             merged[i] = op === 'add' ? previous.data[i] | mask[i] : previous.data[i] & (mask[i] ? 0 : 1);
           }
-          const outline = traceOutline(merged, result.work.width, result.work.height);
+          // An AOI is one polygon, so a selection that ends up in several
+          // disjoint parts can only follow the largest — but it has to *say*
+          // so rather than quietly drop the rest, and the coverage below has to
+          // describe the mask that is really kept.
+          const traced = traceOutlines(merged, result.work.width, result.work.height);
+          parts = traced.length;
+          const outline = traced[0]?.ring || [];
           const simplified = simplifyRing(outline, Math.max(1.2, result.work.width / 220));
           ring = simplified.map(([x, y]) => ({ u: x / result.work.width, v: y / result.work.height }));
           mask = merged;
         }
 
+        // the numbers must describe the mask, not the last click
+        let keptPixels = 0;
+        for (let i = 0; i < mask.length; i += 1) keptPixels += mask[i] ? 1 : 0;
         const next = {
           ring,
           mask: { data: mask, width: result.work.width, height: result.work.height },
-          stats: { ...result.stats, outlineVertices: ring.length },
+          stats: {
+            ...result.stats,
+            coverage: keptPixels / (result.work.width * result.work.height),
+            outlineVertices: ring.length,
+            parts
+          },
           clipped: result.clipped,
+          parts,
           seed: { u, v },
           op,
           tolerance

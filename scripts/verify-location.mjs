@@ -6,13 +6,14 @@
 //     reusing the previous scene's coordinates
 //   npm run verify:location
 import { launch, watchPage, APP_URL, SHOTS_DIR, prepareDirs } from './browser.mjs';
+import { execFile } from 'node:child_process';
 import { writeFileSync } from 'node:fs';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 prepareDirs();
-const unknown = path.join(tmpdir(), 'unknown_scene.tif');
-writeFileSync(unknown, 'II*\0 not-really-a-geotiff');
+const execFileAsync = promisify(execFile);
 
 const browser = await launch({ width: 1680, height: 950 });
 const page = watchPage(await browser.newPage(), 'location');
@@ -64,34 +65,46 @@ const box = await page.evaluate(() => {
   return { x: r.x, y: r.y, w: r.width, h: r.height };
 });
 await page.evaluate(() => {
-  const b = [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Draw AOI'));
-  b && b.click();
+  const b = [...document.querySelectorAll('button')].find((x) => /^Draw (polygon|AOI)\b/.test(x.textContent.trim()));
+  if (!b) throw new Error('no AOI-draw control on the rail');
+  b.click();
 });
 for (const [u, v] of [[0.12, 0.1], [0.3, 0.12], [0.32, 0.3], [0.14, 0.28]]) {
   await page.mouse.click(box.x + box.w * u, box.y + box.h * v);
   await new Promise((r) => setTimeout(r, 120));
 }
+await page.mouse.move(box.x + box.w * 0.5, box.y + box.h * 0.5);
 await page.keyboard.press('Enter');
-await new Promise((r) => setTimeout(r, 500));
+await new Promise((r) => setTimeout(r, 600));
 const h2 = await header();
 console.log('header after AOI move:', h2);
 check('place recomputes with the AOI', h1 !== h2 && /km|at /.test(h2 || ''), `${h1} → ${h2}`);
 await page.screenshot({ path: path.join(SHOTS_DIR, '10-location.jpg'), type: 'jpeg', quality: 84 });
 
-// --- 3. an upload with no CRS must not inherit the old coordinates
+// --- 3. a raster with no CRS must not inherit the old coordinates
+// (an *undecodable* file is a different case: it is refused outright, which
+// verify-console covers. Here the file decodes to real pixels — a PNG has no
+// georeferencing at all — so the scene registers unlocated and every
+// coordinate, area and export has to be withheld.)
 await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Restore bundled scene'))?.click());
 await new Promise((r) => setTimeout(r, 400));
-const input = await page.$('input[type=file][accept*=".tif"]');
-await input.uploadFile(unknown);
-await new Promise((r) => setTimeout(r, 900));
+const png = path.join(tmpdir(), 'avni-location-unlocated.png');
+await execFileAsync('convert', ['-size', '240x160', 'gradient:navy-orange', png]);
+const input = await page.$('input[type=file]');
+await input.uploadFile(png);
+await new Promise((r) => setTimeout(r, 1600));
 
 const h3 = await header();
 const r3 = await readout();
 console.log('header after upload:', h3);
 console.log('viewer after upload:', r3);
-check('upload flags the scene unlocated', /unlocated/i.test(h3 || ''), h3);
+check('upload of a CRS-less raster flags the scene unlocated', /unlocated/i.test(h3 || ''), h3);
 check('viewer withholds coordinates', !/°N/.test(r3) && /unlocated/i.test(r3), r3);
-check('no fake preview is shown for an undecodable file', await page.evaluate(() => document.body.innerText.includes('no renderable preview')));
+check(
+  'no fake preview is shown for an unreadable file',
+  await page.evaluate(() => !document.body.innerText.includes('no renderable preview')),
+  'the PNG decodes, so its own pixels are on screen'
+);
 
 const side = await page.evaluate(() => {
   const a = [...document.querySelectorAll('aside')][0];
@@ -100,11 +113,30 @@ const side = await page.evaluate(() => {
 });
 check('sidebar extent marked unverified', /unverified/.test(side), side);
 
+// the same picture: a file that will not decode is refused, not half-registered
+await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => b.textContent.includes('Restore bundled scene'))?.click());
+await new Promise((r) => setTimeout(r, 400));
+const unknown = path.join(tmpdir(), 'unknown_scene.tif');
+writeFileSync(unknown, 'II*\0 not-really-a-geotiff');
+await (await page.$('input[type=file]')).uploadFile(unknown);
+await new Promise((r) => setTimeout(r, 1400));
+const refused = await page.evaluate(() => ({
+  toast: /not registered/.test(document.body.innerText),
+  stale: !/no renderable preview for unknown_scene\.tif/.test(document.body.innerText),
+  name: /unknown_scene\.tif/.test(document.querySelector('aside').innerText)
+}));
+check('an undecodable file is refused rather than registered blank', refused.toast && refused.stale && !refused.name, JSON.stringify(refused));
+
+// put the unlocated raster back for the export checks below
+await (await page.$('input[type=file]')).uploadFile(png);
+await new Promise((r) => setTimeout(r, 1600));
+check('the CRS-less raster is back on screen', /unlocated/i.test((await header()) || ''), await header());
+
 // ask a question: the geodetic row must withhold coordinates
 await page.click('#composer-input');
 await page.type('#composer-input', 'Where is flooding most severe?', { delay: 3 });
 await page.keyboard.press('Enter');
-await new Promise((r) => setTimeout(r, 4500));
+await new Promise((r) => setTimeout(r, 5000));
 const geodetic = await page.evaluate(() => {
   const t = document.body.innerText;
   const i = t.indexOf('coordinates withheld');

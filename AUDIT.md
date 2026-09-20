@@ -180,3 +180,34 @@ real NDWI/σ0 pass is a backend change, not a bug fix.
 GitHub, and they are the visual evidence for every UI finding, so they stay in the repo); §3 keeps the
 original severity ranking even where a fix landed, so the "worst first" order still reads as the
 original risk assessment.
+
+---
+
+## 8. Second pass — the three reported issues
+
+Three issues were raised against the console after the first pass: mark an AOI by segmentation rather
+than tracing it vertex by vertex, stop the pixels tearing apart when you zoom in, and read real
+imagery containers instead of fixtures. All three are implemented and verified on this branch
+(`npm run verify` — console 21, zoom, segment, location, a11y and features 18, plus `npm test`).
+
+This pass then went after the *implementation* rather than the feature list, because a feature that
+only works on a lucky click is not the feature that was asked for. What the adversarial checks found
+and what changed:
+
+| Finding (measured) | Evidence | Fix |
+| --- | --- | --- |
+| Seeded region growing stopped at the **first** over-tolerance pixel it popped, so on the bundled SAR scene a click was refused **9 times out of 12** ("nothing to segment here") | 12-point click grid, in-browser | Region growing is now a thresholded flood fill: the region is the connected set of pixels within `tolerance` of the seed. Growth visits the whole frontier before giving up |
+| The edge barrier was computed on raw speckle: **47.6 %** of the working grid cleared `edgeStop`, so nearly every pixel read as an edge and growth was walled into a handful of pixels | `edgeMagnitude` over the bundled scene | Blur before differencing + non-maximum suppression: **16.5 %** over threshold, an edge is now a thin ridge |
+| Edge pixels were a hard wall — the region lost the feature's own rim | blob fixture 1 200 px → 936 px | An edge pixel is included in the mask but never expanded from: the rim is part of the AOI, the flood still cannot cross into the next field |
+| The tolerance slider barely did anything (34 → 65 moved coverage **0.3 % → 0.7 %**), then jumped to 45 % | coverage-vs-tolerance table over 8 seeds | With thresholded growth the control is monotone: 20 → 1.7 %, 45 → 6.2 %, 75 → 48.6 % on the same seed. `scripts/verify-segment.mjs` asserts monotonicity |
+| A click that lands on speckle was refused instead of adapted to | in-browser | `segmentAt` widens the tolerance (×1.6, ×2.6) and retries when the first pass is under the minimum, and `stopNote` says "widened the tolerance to N" when it did |
+| Shift-click **dropped the earlier region from the AOI**: the ring is traced from the topmost contour only, so a two-part selection exported one part | shift-click on the bundled scene: mask held both, ring held one | `traceOutlines` returns every part; the ring follows the largest and the rail and toast report "N separate areas — the AOI follows the largest" instead of silently discarding the rest |
+| After add/subtract the rail reported the **last click's** coverage, not the selection's (3.0 % + 0.3 % shown as 0.3 %) | shift then alt-click | Coverage is counted from the mask that is kept |
+| A real but small selection read as "0.0 % of the scene" | 4-vertex region on the grid | Below 1 % the share is quoted to two decimals (0.02 %, 0.44 %) |
+| The committed tree's own `npm run verify` **died at the first step**: `verify:a11y` pointed at a script that was not in the repo, and `verify:console`/`verify:location` still asserted the old "unlocated upload" behaviour for a file that is now refused outright | `npm run verify` on the committed tree | `scripts/a11y.mjs` written (axe over shell, answer, dialog, phone drawer); the two scripts updated to the current, stricter contract — a CRS-less **PNG** is the unlocated case, an undecodable GeoTIFF is refused |
+| Two moderate axe findings: no `main` landmark, no `h1`, and the guide dialog titled with an `h3` | axe-core | `<main>` + a screen-reader `h1` in `App.jsx`, dialog title is an `h2`; axe is now clean in all four states |
+
+**Known limitation, stated rather than hidden:** an AOI is one polygon, so a selection that ends up in
+several disjoint parts can only become the largest of them. The UI now names the count and which part
+the outline follows; a multi-polygon AOI would have to reach the area maths and the exporters, which
+is a larger change than this pass.

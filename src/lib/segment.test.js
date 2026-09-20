@@ -13,7 +13,8 @@ import {
   segmentAt,
   simplifyRing,
   stopNote,
-  traceOutline
+  traceOutline,
+  traceOutlines
 } from '../lib/segment.js';
 
 /** A light field with one dark rectangle: the simplest "mark the water" case. */
@@ -83,6 +84,112 @@ describe('region growing', () => {
     const result = segmentAt(speck, { u: 0.53, v: 0.53 });
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/smaller than the minimum|too small/);
+  });
+
+  it('grows monotonically with the tolerance, from the same seed', () => {
+    // the slider has to mean something: a wider tolerance is a larger region.
+    // A flat blob cannot show this (any tolerance past the blob's own contrast
+    // marks the whole blob), so the frame is a ramp: the seed sits in a bright
+    // patch and every further ring is a little closer to the background.
+    const width = 200;
+    const height = 200;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const r = Math.hypot(x - 100, y - 100);
+        const v = r < 10 ? 200 : r < 25 ? 170 : r < 40 ? 140 : 110;
+        const i = (y * width + x) * 4;
+        data[i] = v;
+        data[i + 1] = v;
+        data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    const ramp = { width, height, data };
+    const areas = [10, 30, 60, 90].map((tolerance) => segmentAt(ramp, { u: 0.5, v: 0.5 }, { tolerance }).area);
+    for (let i = 1; i < areas.length; i += 1) expect(areas[i]).toBeGreaterThanOrEqual(areas[i - 1]);
+    expect(areas[areas.length - 1]).toBeGreaterThan(areas[0]);
+  });
+
+  it('keeps the rim of the feature and never crosses the edge into the field', () => {
+    // the rim is part of the object: a region that stops short of it silently
+    // under-reports the area, and one that steps through it leaks into the
+    // neighbouring field
+    const image = fieldWithBlob();
+    const result = segmentAt(image, { u: 0.5, v: 0.5 });
+    const { width, height, data } = result.work;
+    for (let i = 0; i < width * height; i += 1) {
+      if (!result.mask[i]) continue;
+      const x = i % width;
+      const y = (i - x) / width;
+      expect(x).toBeGreaterThanOrEqual(20);
+      expect(x).toBeLessThanOrEqual(59);
+      expect(y).toBeGreaterThanOrEqual(15);
+      expect(y).toBeLessThanOrEqual(44);
+    }
+    // the blob's top row, in full bar the two corners the clean-up pass trims
+    const rim = [...result.mask.slice(15 * width + 20, 15 * width + 60)].reduce((a, b) => a + b, 0);
+    expect(rim).toBeGreaterThanOrEqual(38);
+    const blobPixels = 40 * 30;
+    const kept = [...result.mask].reduce((a, b) => a + b, 0);
+    expect(kept).toBeGreaterThan(blobPixels * 0.95);
+    expect(data.length).toBeGreaterThan(0);
+  });
+
+  it('widens the tolerance rather than refusing a click that is just too tight', () => {
+    // a 4x4 bright patch inside a disc, in a darker field: at the analyst's
+    // tolerance the patch alone is under the minimum, one rung up the ladder
+    // reaches the disc — the click must mark it and say the tolerance moved
+    const width = 200;
+    const height = 200;
+    const data = new Uint8ClampedArray(width * height * 4);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const r = Math.hypot(x - 100, y - 100);
+        const v = r < 20 ? 122 : 120;
+        const i = (y * width + x) * 4;
+        data[i] = v;
+        data[i + 1] = v;
+        data[i + 2] = v;
+        data[i + 3] = 255;
+      }
+    }
+    for (let y = 98; y < 102; y += 1) {
+      for (let x = 98; x < 102; x += 1) {
+        const i = (y * width + x) * 4;
+        data[i] = 130;
+        data[i + 1] = 130;
+        data[i + 2] = 130;
+      }
+    }
+    const tight = segmentAt({ width, height, data }, { u: 0.5, v: 0.5 }, { tolerance: 5 });
+    expect(tight.ok).toBe(true);
+    expect(tight.relaxed).toBeGreaterThan(1);
+    expect(tight.stats.coverage).toBeGreaterThan(0.02);
+    expect(stopNote(tight)).toMatch(/widened the tolerance/);
+  });
+
+  it('counts every part of a multi-part selection', () => {
+    // two blobs, one mask: the AOI can only follow the largest, but the caller
+    // has to be able to say how many parts there were
+    const image = fieldWithBlob({ width: 120, height: 60, box: [10, 20, 20, 20] });
+    const second = fieldWithBlob({ width: 120, height: 60, box: [80, 20, 20, 20] });
+    for (let i = 0; i < image.data.length; i += 4) {
+      if (second.data[i] < 100) {
+        image.data[i] = second.data[i];
+        image.data[i + 1] = second.data[i + 1];
+        image.data[i + 2] = second.data[i + 2];
+      }
+    }
+    const a = segmentAt(image, { u: 0.17, v: 0.5 });
+    const b = segmentAt(image, { u: 0.75, v: 0.5 });
+    expect(a.ok && b.ok).toBe(true);
+    const merged = new Uint8Array(a.mask.length);
+    for (let i = 0; i < merged.length; i += 1) merged[i] = a.mask[i] | b.mask[i];
+    const parts = traceOutlines(merged, a.work.width, a.work.height);
+    expect(parts.length).toBe(2);
+    expect(parts[0].pixels).toBeGreaterThan(parts[1].pixels - 1);
+    expect(parts[0].ring.length).toBeGreaterThan(3);
   });
 
   it('finds a boundary through the Sobel edge barrier', () => {

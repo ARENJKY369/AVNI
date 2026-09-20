@@ -114,7 +114,11 @@ ships with `@sparticuz/chromium`, take the target from `AVNI_URL` (default
 | `npm test` | geodetic maths, footprint/raster invariants, gate derivation, intent routing, and the withhold contract for every exporter |
 | `npm run verify:console` | 19 end-to-end checks: gate arithmetic, scale-bar truth, draw-mode click isolation, scroll behaviour, export actions, the unlocated upload path, responsive shell |
 | `npm run verify:zoom` | the point under the cursor survives zoom and pan; scale bar matches the ground; drawers and phone overflow |
-| `npm run verify:location` | place names resolve and recompute; an unlocated upload withholds everywhere, including the bytes inside the JSON bundle |
+| `npm run verify:location` | place names resolve and recompute; a CRS-less upload withholds everywhere, including the bytes inside the JSON bundle; an undecodable file is refused outright |
+| `npm run verify:segment` | segmentation marking: every click on the scene marks a region, the tolerance slider grows the same seed monotonically, shift adds, and Enter turns the outline into the AOI |
+| `npm run verify:a11y` | axe-core over the shell, mid-answer, the guide dialog and the phone drawer; every visible control has an accessible name |
+| `npm run verify:features` | the four imagery containers end to end (GeoTIFF, COG over HTTP, JPEG2000, Sentinel SAFE) plus the zoom/segmentation promises |
+| `npm run verify` | the whole chain above, in order |
 | `npm run shots` / `npm run shots:responsive` | regenerates `shots/*.jpg` (the committed screenshots) |
 
 CI runs `npm ci && npm test && npm run build` on every push

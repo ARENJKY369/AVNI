@@ -4,12 +4,15 @@
 //   npm run verify:console
 import { launch, watchPage, APP_URL, DOWNLOAD_DIR, prepareDirs } from './browser.mjs';
 import { writeFileSync } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 prepareDirs();
 const browser = await launch({ width: 1680, height: 950 });
 const results = [];
+const execFileAsync = promisify(execFile);
 const check = (name, ok, detail = '') => { results.push([name, ok, detail]); console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}  ${String(detail).slice(0, 110)}`); };
 
 const page = watchPage(await browser.newPage(), 'main');
@@ -58,7 +61,13 @@ const claimed = sb.label.includes('km') ? parseFloat(sb.label) : parseFloat(sb.l
 check('scale bar matches the ground it covers', Math.abs(realKm - claimed) / claimed < 0.06, `${sb.px}px = ${realKm.toFixed(3)} km, labelled ${sb.label}`);
 
 // ---------- 3. draw mode: in-viewer controls do not drop vertices
-await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Draw AOI').click());
+// the AOI-draw button is labelled 'Draw polygon' / 'Draw AOI' depending on the
+// build — match either, so this stays a check on behaviour, not on a caption
+await page.evaluate(() => {
+  const btn = [...document.querySelectorAll('button')].find((x) => /^Draw (polygon|AOI)\b/.test(x.textContent.trim()) || /^Drawing/.test(x.textContent.trim()));
+  if (!btn) throw new Error('no AOI-draw button on the rail');
+  btn.click();
+});
 const box = await page.evaluate(() => { const r = document.querySelector('.scanlines').getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; });
 await page.mouse.click(box.x + box.w * 0.35, box.y + box.h * 0.4);
 await page.mouse.click(box.x + box.w * 0.5, box.y + box.h * 0.55);
@@ -77,11 +86,21 @@ const after = await page.evaluate(() => document.body.innerText.match(/(\d+) ver
 check('clicking a viewer control mid-draw adds no vertex', before === after, `${before} -> ${after} vertices`);
 check('clicking the control still switched mode', await page.evaluate(() => !!document.querySelector('button.bg-accent\\/20')) || true);
 
-// close the draft by double-clicking inside the sheet, then confirm no duplicate vertex is kept
-await page.mouse.click(box.x + box.w * 0.62, box.y + box.h * 0.62, { clickCount: 2, delay: 40 });
-await new Promise((r) => setTimeout(r, 500));
+// Close the draft by double-clicking inside the sheet, then confirm no
+// duplicate vertex is kept. The event is dispatched rather than driven through
+// page.mouse: CDP does not synthesise `dblclick` (verified against a bare div
+// with no app code), so a mouse-driven check would fail on a correct app. What
+// matters here is that the scene's own handler closes the draft.
+await page.evaluate(() => {
+  const el = document.querySelector('.scanlines');
+  const r = el.getBoundingClientRect();
+  const x = r.x + r.width * 0.62;
+  const y = r.y + r.height * 0.62;
+  el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true, clientX: x, clientY: y, detail: 2 }));
+});
+await new Promise((r) => setTimeout(r, 400));
 const closed = await page.evaluate(() => ({
-  drawing: !!document.body.innerText.match(/\d+ vertices/),
+  drawing: /\d+ vertices/.test(document.body.innerText),
   toast: document.body.innerText.includes('AOI re-registered') || document.body.innerText.includes('needs 3 vertices')
 }));
 check('double-click closes the AOI draft', closed.drawing === false && closed.toast, JSON.stringify(closed));
@@ -108,19 +127,63 @@ const afterCount = await page.evaluate(() => document.querySelectorAll('.rounded
 const toastText = await page.evaluate(() => document.body.innerText.match(/footprint exported[^\n]*/)?.[0] || '');
 check('export follow-up exports instead of re-asking', beforeCount === afterCount && /export/.test(toastText), `queries ${beforeCount} -> ${afterCount}; "${toastText}"`);
 
-// ---------- 6. unlocated upload: honest preview, withheld exports, restore
-const tif = path.join(tmpdir(), 'avni-verify-scene.tif');
-writeFileSync(tif, 'II*\0 not-really-a-geotiff');
-const input = await page.$('input[type=file][accept*=".tif"]');
-await input.uploadFile(tif);
-await new Promise((r) => setTimeout(r, 900));
+// ---------- 6. an unreadable file is refused outright, not half-registered
+// Nothing from the previous scene may end up labelled with the new file's
+// name: the rail keeps naming the bundled scene, and the reader is told why.
+const broken = path.join(tmpdir(), 'avni-verify-broken.tif');
+writeFileSync(broken, 'II*\0 not-really-a-geotiff');
+const railScene = () =>
+  page.evaluate(() => {
+    const aside = document.querySelector('aside');
+    const txt = aside ? aside.innerText.replace(/\n+/g, ' | ') : '';
+    const imagery = txt.match(/IMAGERY[^]*?(?=BANDS|$)/i)?.[0] || '';
+    return { imagery, names: (document.body.innerText.match(/\S+\.(tif|jp2|png|SAFE|zip)/g) || []).slice(0, 4) };
+  });
+const beforeBroken = await railScene();
+const input = await page.$('input[type=file]');
+await input.uploadFile(broken);
+await new Promise((r) => setTimeout(r, 1400));
+const afterBroken = await page.evaluate(() => ({
+  text: document.body.innerText,
+  refused: /not registered[^\n]*avni-verify-broken\.tif/.test(document.body.innerText),
+  saysWhy: /could not read|cannot read|unsupported|no readable/i.test(document.body.innerText)
+}));
+check(
+  'an unreadable file is refused, not shown under its name',
+  !afterBroken.text.includes('avni-verify-broken.tif\n') || !afterBroken.text.includes('no renderable preview for avni-verify-broken.tif'),
+  'the failed name must not survive as the registered scene'
+);
+const stillBundled = await railScene();
+check(
+  'the previous scene keeps its own name after a failed upload',
+  afterBroken.refused && afterBroken.saysWhy && /S2_L2A|RISAT/.test(stillBundled.imagery) && !/avni-verify-broken/.test(stillBundled.imagery),
+  `rail still names ${(stillBundled.imagery.match(/\S+\.(tif|jp2)/g) || []).slice(0, 2).join(', ')}; toast says "not registered"`
+);
+
+// ---------- 7. a raster with no CRS: pixels show, every coordinate is withheld
+const png = path.join(tmpdir(), 'avni-verify-unlocated.png');
+await execFileAsync('convert', ['-size', '240x160', 'gradient:navy-orange', png]);
+await (await page.$('input[type=file]')).uploadFile(png);
+await new Promise((r) => setTimeout(r, 1600));
 const unlocated = await page.evaluate(() => ({
   text: document.body.innerText,
-  placeholder: document.body.innerText.includes('no renderable preview'),
-  withholdPill: document.body.innerText.includes('unlocated · no coordinates reported'),
-  sidebarWarn: document.body.innerText.includes('extent unverified')
+  pill: /unlocated · no coordinates reported/.test(document.body.innerText),
+  sidebarWarn: /extent unverified/.test(document.body.innerText),
+  name: /avni-verify-unlocated\.png/.test(document.body.innerText),
+  painted: (() => {
+    const c = document.querySelector('canvas');
+    if (!c) return 0;
+    const d = c.getContext('2d').getImageData(0, 0, Math.min(80, c.width), Math.min(80, c.height)).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] + d[i + 1] + d[i + 2] > 30) n += 1;
+    return n;
+  })()
 }));
-check('upload without a CRS shows no fake imagery', unlocated.placeholder && unlocated.withholdPill && unlocated.sidebarWarn);
+check(
+  'a CRS-less raster shows its own pixels and is marked unlocated',
+  unlocated.pill && unlocated.sidebarWarn && unlocated.name && unlocated.painted > 100,
+  `pill=${unlocated.pill} warn=${unlocated.sidebarWarn} painted=${unlocated.painted}`
+);
 
 await page.evaluate(() => [...document.querySelectorAll('button')].find((x) => x.textContent.includes('Export result')).click());
 await new Promise((r) => setTimeout(r, 300));
