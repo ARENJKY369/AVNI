@@ -59,6 +59,46 @@
 }
 
 /* ------------------------------------------------------------------ */
+/* accessibility & platform                                            */
+/* ------------------------------------------------------------------ */
+
+/* visible keyboard focus everywhere, never removed — the console is
+   keyboard-drivable and the ring is the only thing that says where you are */
+:focus-visible {
+  outline: 2px solid rgba(45, 212, 191, 0.9);
+  outline-offset: 2px;
+}
+
+/* skip straight to the scene */
+.skip-link {
+  position: absolute;
+  left: 10px;
+  top: -48px;
+  z-index: 100;
+  transition: top 0.12s ease-out;
+}
+.skip-link:focus {
+  top: 10px;
+}
+
+/* the OS says reduce motion: a measuring instrument does not need entrances */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* iOS: keep the composer above the home indicator */
+.safe-bottom {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+
+/* ------------------------------------------------------------------ */
 /* base                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -66,6 +106,16 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* iOS Safari collapses the URL bar and the bottom composer would sit under
+   it; dvh tracks the real viewport where it is supported. */
+@supports (height: 100dvh) {
+  html,
+  body,
+  #root {
+    height: 100dvh;
+  }
 }
 
 body {
@@ -313,4 +363,31 @@ kbd {
 }
 .answer-in {
   animation: answer-in 0.24s ease-out;
+}
+
+/* ------------------------------------------------------------------ */
+/* print: the analyst report on paper                                  */
+/* ------------------------------------------------------------------ */
+@media print {
+  .no-print,
+  header,
+  .scanlines,
+  .grain {
+    display: none !important;
+  }
+  html,
+  body,
+  #root {
+    height: auto;
+    background: #fff;
+  }
+  body {
+    color: #111;
+  }
+  .recess,
+  .answer-card {
+    border-color: #d0d0d0 !important;
+    background: #fff !important;
+    color: #111 !important;
+  }
 }
